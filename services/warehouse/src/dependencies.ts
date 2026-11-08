@@ -4,6 +4,7 @@ import {
   createLogger,
   requiredEnv,
 } from '@lunch/shared';
+import { InventoryQueries } from './application/inventory-queries.js';
 import { Warehouse } from './application/warehouse.js';
 import { DynamoInventoryRepository } from './infrastructure/dynamo-inventory-repository.js';
 
@@ -17,3 +18,4 @@ export const warehouse = new Warehouse(
   repository,
   new EventBridgePublisher(requiredEnv('EVENT_BUS_NAME')),
 );
+export const queries = new InventoryQueries(repository);

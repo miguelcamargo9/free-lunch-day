@@ -1,5 +1,5 @@
 import { INGREDIENTS, type Ingredient } from '@lunch/contracts';
-import type { InventoryRepository, StockMove } from '../src/application/ports.js';
+import type { InventoryRepository, PurchaseReceipt, StockMove } from '../src/application/ports.js';
 import { INITIAL_STOCK, type Reservation } from '../src/domain/reservation.js';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -36,18 +36,34 @@ export class InMemoryInventoryRepository implements InventoryRepository {
   async moveStockToReservation(move: StockMove): Promise<boolean> {
     await tick();
     const stock = this.stock.get(move.ingredient) ?? INITIAL_STOCK;
-    const reservation = this.reservations.get(move.dishId);
-    const line = reservation?.lines[move.ingredient];
-    if (!reservation || !line || stock < move.quantity || line.reserved !== move.reservedBefore) {
-      return false;
-    }
+    if (stock < move.quantity || !this.updateReserved(move, move.quantity)) return false;
     this.stock.set(move.ingredient, stock - move.quantity);
-    this.reservations.set(move.dishId, {
+    return true;
+  }
+
+  async receivePurchase(receipt: PurchaseReceipt): Promise<boolean> {
+    await tick();
+    const reservation = this.reservations.get(receipt.dishId);
+    if (reservation?.appliedPurchases?.includes(receipt.purchaseId)) return false;
+    if (!this.updateReserved(receipt, receipt.allocated, receipt.purchaseId)) return false;
+    const stock = this.stock.get(receipt.ingredient) ?? INITIAL_STOCK;
+    this.stock.set(receipt.ingredient, stock + receipt.surplus);
+    return true;
+  }
+
+  private updateReserved(change: StockMove | PurchaseReceipt, added: number, purchaseId?: string) {
+    const reservation = this.reservations.get(change.dishId);
+    const line = reservation?.lines[change.ingredient];
+    if (!reservation || !line || line.reserved !== change.reservedBefore) return false;
+    this.reservations.set(change.dishId, {
       ...reservation,
       lines: {
         ...reservation.lines,
-        [move.ingredient]: { ...line, reserved: line.reserved + move.quantity },
+        [change.ingredient]: { ...line, reserved: line.reserved + added },
       },
+      ...(purchaseId && {
+        appliedPurchases: [...(reservation.appliedPurchases ?? []), purchaseId],
+      }),
     });
     return true;
   }

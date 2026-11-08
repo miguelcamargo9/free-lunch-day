@@ -56,6 +56,10 @@ export class Kitchen {
     );
   }
 
+  async markWaiting(dishId: string): Promise<void> {
+    await this.advance(await this.getDish(dishId), 'WAITING_INGREDIENTS');
+  }
+
   async prepareAndDeliver(dishId: string): Promise<void> {
     const dish = await this.getDish(dishId);
     const delivered = await this.advance(await this.advance(dish, 'PREPARING'), 'DELIVERED');

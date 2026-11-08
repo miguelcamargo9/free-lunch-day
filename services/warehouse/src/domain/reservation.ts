@@ -10,6 +10,12 @@ export interface ReservationLine {
 export interface Reservation {
   readonly dishId: string;
   readonly lines: Partial<Record<Ingredient, ReservationLine>>;
+  readonly appliedPurchases?: readonly string[];
+}
+
+export interface PurchaseAllocation {
+  readonly allocated: number;
+  readonly surplus: number;
 }
 
 export function newReservation(
@@ -41,4 +47,9 @@ export function neededIngredients(reservation: Reservation): IngredientQuantity[
 
 export function quantityToTake(stock: number, missing: number): number {
   return Math.max(0, Math.min(stock, missing));
+}
+
+export function allocatePurchase(line: ReservationLine, quantitySold: number): PurchaseAllocation {
+  const allocated = quantityToTake(quantitySold, line.needed - line.reserved);
+  return { allocated, surplus: quantitySold - allocated };
 }

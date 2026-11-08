@@ -77,4 +77,27 @@ describe('Kitchen', () => {
 
     expect((await queries.findOrder(order.orderId))?.counts.DELIVERED).toBe(1);
   });
+
+  it('marks a dish as waiting and still delivers it once reserved', async () => {
+    const order = await kitchen.placeOrder(1);
+    await kitchen.startBatch(order.orderId, 1);
+    const [dishId] = repository.dishes.keys();
+
+    await kitchen.markWaiting(dishId as string);
+    expect(repository.dishes.get(dishId as string)?.status).toBe('WAITING_INGREDIENTS');
+
+    await kitchen.prepareAndDeliver(dishId as string);
+    expect(repository.dishes.get(dishId as string)?.status).toBe('DELIVERED');
+  });
+
+  it('ignores a shortage that arrives after the dish was delivered', async () => {
+    const order = await kitchen.placeOrder(1);
+    await kitchen.startBatch(order.orderId, 1);
+    const [dishId] = repository.dishes.keys();
+    await kitchen.prepareAndDeliver(dishId as string);
+
+    await kitchen.markWaiting(dishId as string);
+
+    expect(repository.dishes.get(dishId as string)?.status).toBe('DELIVERED');
+  });
 });

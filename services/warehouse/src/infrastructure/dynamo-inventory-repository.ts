@@ -1,19 +1,21 @@
 import {
   GetCommand,
-  PutCommand,
   ScanCommand,
   TransactWriteCommand,
   type DynamoDBDocumentClient,
+  type TransactWriteCommandInput,
 } from '@aws-sdk/lib-dynamodb';
 import { INGREDIENTS, type Ingredient } from '@lunch/contracts';
-import { isConditionFailure } from '@lunch/shared';
-import type { InventoryRepository, StockMove } from '../application/ports.js';
+import { isWriteConflict, putIfAbsent } from '@lunch/shared';
+import type { InventoryRepository, PurchaseReceipt, StockMove } from '../application/ports.js';
 import { INITIAL_STOCK, type Reservation } from '../domain/reservation.js';
 
 export interface InventoryTables {
   readonly inventory: string;
   readonly reservations: string;
 }
+
+type TransactItem = NonNullable<TransactWriteCommandInput['TransactItems']>[number];
 
 interface StockItem {
   readonly ingredient: Ingredient;
@@ -27,22 +29,8 @@ export class DynamoInventoryRepository implements InventoryRepository {
     private readonly tables: InventoryTables,
   ) {}
 
-  async openReservation(reservation: Reservation): Promise<Reservation> {
-    try {
-      await this.client.send(
-        new PutCommand({
-          TableName: this.tables.reservations,
-          Item: reservation,
-          ConditionExpression: 'attribute_not_exists(dishId)',
-        }),
-      );
-      return reservation;
-    } catch (error) {
-      if (!isConditionFailure(error)) throw error;
-      const stored = await this.findReservation(reservation.dishId);
-      if (!stored) throw error;
-      return stored;
-    }
+  openReservation(reservation: Reservation): Promise<Reservation> {
+    return putIfAbsent(this.client, this.tables.reservations, 'dishId', reservation);
   }
 
   async findReservation(dishId: string): Promise<Reservation | undefined> {
@@ -78,39 +66,70 @@ export class DynamoInventoryRepository implements InventoryRepository {
   }
 
   async moveStockToReservation(move: StockMove): Promise<boolean> {
+    return this.transact([
+      this.stockChange(move.ingredient, -move.quantity),
+      this.reservedChange(move, move.quantity),
+    ]);
+  }
+
+  async receivePurchase(receipt: PurchaseReceipt): Promise<boolean> {
+    const reservation = this.reservedChange(receipt, receipt.allocated, receipt.purchaseId);
+    return this.transact(
+      receipt.surplus > 0
+        ? [reservation, this.stockChange(receipt.ingredient, receipt.surplus)]
+        : [reservation],
+    );
+  }
+
+  private async transact(items: TransactItem[]): Promise<boolean> {
     try {
-      await this.client.send(
-        new TransactWriteCommand({
-          TransactItems: [
-            {
-              Update: {
-                TableName: this.tables.inventory,
-                Key: { ingredient: move.ingredient },
-                UpdateExpression: 'SET stock = if_not_exists(stock, :initial) - :n',
-                ConditionExpression: 'attribute_not_exists(stock) OR stock >= :n',
-                ExpressionAttributeValues: { ':initial': INITIAL_STOCK, ':n': move.quantity },
-              },
-            },
-            {
-              Update: {
-                TableName: this.tables.reservations,
-                Key: { dishId: move.dishId },
-                UpdateExpression: 'SET #lines.#ingredient.reserved = :after',
-                ConditionExpression: '#lines.#ingredient.reserved = :before',
-                ExpressionAttributeNames: { '#lines': 'lines', '#ingredient': move.ingredient },
-                ExpressionAttributeValues: {
-                  ':before': move.reservedBefore,
-                  ':after': move.reservedBefore + move.quantity,
-                },
-              },
-            },
-          ],
-        }),
-      );
+      await this.client.send(new TransactWriteCommand({ TransactItems: items }));
       return true;
     } catch (error) {
-      if (isConditionFailure(error)) return false;
+      if (isWriteConflict(error)) return false;
       throw error;
     }
+  }
+
+  private stockChange(ingredient: Ingredient, delta: number): TransactItem {
+    return {
+      Update: {
+        TableName: this.tables.inventory,
+        Key: { ingredient },
+        UpdateExpression: 'SET stock = if_not_exists(stock, :initial) + :delta',
+        ConditionExpression: 'attribute_not_exists(stock) OR stock >= :minimum',
+        ExpressionAttributeValues: {
+          ':initial': INITIAL_STOCK,
+          ':delta': delta,
+          ':minimum': Math.max(0, -delta),
+        },
+      },
+    };
+  }
+
+  private reservedChange(
+    change: StockMove | PurchaseReceipt,
+    added: number,
+    purchaseId?: string,
+  ): TransactItem {
+    const purchase = purchaseId === undefined ? undefined : { ':purchaseId': purchaseId };
+    return {
+      Update: {
+        TableName: this.tables.reservations,
+        Key: { dishId: change.dishId },
+        UpdateExpression: purchase
+          ? 'SET #lines.#ingredient.reserved = :after, appliedPurchases = list_append(if_not_exists(appliedPurchases, :none), :purchases)'
+          : 'SET #lines.#ingredient.reserved = :after',
+        ConditionExpression: purchase
+          ? '#lines.#ingredient.reserved = :before AND NOT contains(appliedPurchases, :purchaseId)'
+          : '#lines.#ingredient.reserved = :before',
+        ExpressionAttributeNames: { '#lines': 'lines', '#ingredient': change.ingredient },
+        ExpressionAttributeValues: {
+          ':before': change.reservedBefore,
+          ':after': change.reservedBefore + added,
+          ...(purchase && { ...purchase, ':none': [], ':purchases': [purchaseId] }),
+        },
+      },
+    };
   }
 }

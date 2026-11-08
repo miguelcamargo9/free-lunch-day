@@ -2,39 +2,7 @@ org: miguelcamargo9
 app: free-lunch-day
 service: lunch-warehouse
 build: ${file(../../infra/templates/build.yml)}
-
-provider:
-  name: aws
-  runtime: nodejs22.x
-  architecture: arm64
-  region: us-east-1
-  stage: ${opt:stage, 'dev'}
-  memorySize: 256
-  timeout: 10
-  logRetentionInDays: 7
-  environment:
-    EVENT_BUS_NAME: ${param:eventBusName}
-    INVENTORY_TABLE: !Ref InventoryTable
-    RESERVATIONS_TABLE: !Ref ReservationsTable
-    NODE_OPTIONS: --enable-source-maps
-  httpApi:
-    cors: true
-  iam:
-    role:
-      statements:
-        - Effect: Allow
-          Action:
-            [
-              dynamodb:GetItem,
-              dynamodb:PutItem,
-              dynamodb:UpdateItem,
-              dynamodb:Scan,
-              dynamodb:ConditionCheckItem,
-            ]
-          Resource: [!GetAtt InventoryTable.Arn, !GetAtt ReservationsTable.Arn]
-        - Effect: Allow
-          Action: events:PutEvents
-          Resource: ${param:eventBusArn}
+provider: ${file(../../infra/templates/provider.mjs)}
 
 functions:
   getInventory:
@@ -51,8 +19,16 @@ functions:
           functionResponseType: ReportBatchItemFailures
 
 custom:
+  provider:
+    environment:
+      INVENTORY_TABLE: !Ref InventoryTable
+      RESERVATIONS_TABLE: !Ref ReservationsTable
+    iamStatements:
+      - Effect: Allow
+        Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:Scan]
+        Resource: [!GetAtt InventoryTable.Arn, !GetAtt ReservationsTable.Arn]
   subscription:
-    detailTypes: [IngredientsRequested]
+    detailTypes: [IngredientsRequested, IngredientPurchased]
     visibilityTimeout: 180
 
 resources:

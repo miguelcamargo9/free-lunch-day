@@ -60,4 +60,25 @@ describe('DynamoInventoryRepository', () => {
     expect(reserved).toBe(5);
     expect(publisher.ofType('IngredientsReserved')).toHaveLength(5);
   });
+
+  it('applies a purchase once and sends the surplus to stock', async () => {
+    const dishId = dishIds[0] as string;
+    await repository.openReservation({ dishId, lines: { rice: { needed: 2, reserved: 0 } } });
+    const receipt = {
+      dishId,
+      ingredient: 'rice' as const,
+      purchaseId: crypto.randomUUID(),
+      reservedBefore: 0,
+      allocated: 2,
+      surplus: 3,
+    };
+
+    expect(await repository.receivePurchase(receipt)).toBe(true);
+    expect(await repository.receivePurchase(receipt)).toBe(false);
+
+    expect(await repository.getStock('rice')).toBe(8);
+    expect((await repository.findReservation(dishId))?.appliedPurchases).toEqual([
+      receipt.purchaseId,
+    ]);
+  });
 });

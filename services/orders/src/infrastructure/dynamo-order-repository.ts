@@ -6,7 +6,7 @@ import {
   type DynamoDBDocumentClient,
 } from '@aws-sdk/lib-dynamodb';
 import type { DishStatus } from '@lunch/contracts';
-import { isConditionFailure } from '@lunch/shared';
+import { isConditionFailure, putIfAbsent } from '@lunch/shared';
 import type { OrderRepository } from '../application/ports.js';
 import type { Dish } from '../domain/dish.js';
 import type { Order } from '../domain/order.js';
@@ -40,22 +40,8 @@ export class DynamoOrderRepository implements OrderRepository {
     return Item as Order | undefined;
   }
 
-  async createDish(dish: Dish): Promise<Dish> {
-    try {
-      await this.client.send(
-        new PutCommand({
-          TableName: this.tables.dishes,
-          Item: dish,
-          ConditionExpression: 'attribute_not_exists(dishId)',
-        }),
-      );
-      return dish;
-    } catch (error) {
-      if (!isConditionFailure(error)) throw error;
-      const stored = await this.findDish(dish.dishId);
-      if (!stored) throw error;
-      return stored;
-    }
+  createDish(dish: Dish): Promise<Dish> {
+    return putIfAbsent(this.client, this.tables.dishes, 'dishId', dish);
   }
 
   async findDish(dishId: string): Promise<Dish | undefined> {
