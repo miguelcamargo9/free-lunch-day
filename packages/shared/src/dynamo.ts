@@ -2,11 +2,12 @@ import {
   ConditionalCheckFailedException,
   DynamoDBClient,
   TransactionCanceledException,
+  type DynamoDBClientConfig,
 } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 
-export function createDocumentClient(): DynamoDBDocumentClient {
-  return DynamoDBDocumentClient.from(new DynamoDBClient({}), {
+export function createDocumentClient(config: DynamoDBClientConfig = {}): DynamoDBDocumentClient {
+  return DynamoDBDocumentClient.from(new DynamoDBClient(config), {
     marshallOptions: { removeUndefinedValues: true },
   });
 }

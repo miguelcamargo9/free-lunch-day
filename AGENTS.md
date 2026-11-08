@@ -51,4 +51,5 @@ npm test           # vitest
 - One issue per task (1–3 h) with acceptance criteria; one PR per issue.
 - Conventional commits (`feat(warehouse): ...`, `fix(market): ...`, `docs: ...`).
 - Domain logic gets tests first (reservations, state machine, backoff).
+- Repository adapters get integration tests against DynamoDB Local (`npm run db:up`, then `npm run test:integration`).
 - A task is done when `npm run verify` passes and the definition of done in `docs/PLANNING.md` holds.
