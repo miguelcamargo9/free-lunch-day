@@ -11,3 +11,7 @@ services:
   warehouse:
     path: services/warehouse
     params: *eventBus
+
+  market:
+    path: services/market
+    params: *eventBus

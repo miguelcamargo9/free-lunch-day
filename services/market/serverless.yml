@@ -1,0 +1,82 @@
+org: miguelcamargo9
+app: free-lunch-day
+service: lunch-market
+build: ${file(../../infra/templates/build.yml)}
+provider: ${file(../../infra/templates/provider.mjs)}
+
+functions:
+  listPurchases:
+    handler: src/handlers/list-purchases.handler
+    events:
+      - httpApi: GET /purchases
+  marketEvents:
+    handler: src/handlers/market-events.handler
+    events:
+      - sqs:
+          arn: !GetAtt EventsQueue.Arn
+          batchSize: 10
+          functionResponseType: ReportBatchItemFailures
+  purchaseJobs:
+    handler: src/handlers/purchase-jobs.handler
+    timeout: 15
+    events:
+      - sqs:
+          arn: !GetAtt PurchaseJobsQueue.Arn
+          batchSize: 5
+          maximumConcurrency: 5 # protects the external market API
+          functionResponseType: ReportBatchItemFailures
+
+custom:
+  provider:
+    environment:
+      PURCHASE_REQUESTS_TABLE: !Ref PurchaseRequestsTable
+      PURCHASES_TABLE: !Ref PurchasesTable
+      PURCHASES_BY_TIME_INDEX: byTime
+      PURCHASE_JOBS_QUEUE_URL: !Ref PurchaseJobsQueue
+      FARMERS_MARKET_BUY_URL: https://recruitment.alegra.com/api/farmers-market/buy
+    iamStatements:
+      - Effect: Allow
+        Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
+        Resource: [!GetAtt PurchaseRequestsTable.Arn, !GetAtt PurchasesTable.Arn]
+      - Effect: Allow
+        Action: dynamodb:Query
+        Resource: !Join ['', [!GetAtt PurchasesTable.Arn, '/index/byTime']]
+      - Effect: Allow
+        Action: sqs:SendMessage
+        Resource: !GetAtt PurchaseJobsQueue.Arn
+  subscription:
+    detailTypes: [IngredientsShortage]
+    visibilityTimeout: 60
+  workQueues:
+    PurchaseJobs:
+      visibilityTimeout: 90
+
+resources:
+  - Resources:
+      PurchaseRequestsTable:
+        Type: AWS::DynamoDB::Table
+        Properties:
+          BillingMode: PAY_PER_REQUEST
+          AttributeDefinitions:
+            - { AttributeName: requestId, AttributeType: S }
+          KeySchema:
+            - { AttributeName: requestId, KeyType: HASH }
+      PurchasesTable:
+        Type: AWS::DynamoDB::Table
+        Properties:
+          BillingMode: PAY_PER_REQUEST
+          AttributeDefinitions:
+            - { AttributeName: purchaseId, AttributeType: S }
+            - { AttributeName: kind, AttributeType: S }
+            - { AttributeName: at, AttributeType: S }
+          KeySchema:
+            - { AttributeName: purchaseId, KeyType: HASH }
+          GlobalSecondaryIndexes:
+            - IndexName: byTime
+              KeySchema:
+                - { AttributeName: kind, KeyType: HASH }
+                - { AttributeName: at, KeyType: RANGE }
+              Projection:
+                ProjectionType: ALL
+  - ${file(../../infra/templates/event-subscription.mjs)}
+  - ${file(../../infra/templates/work-queues.mjs)}

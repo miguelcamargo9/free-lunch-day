@@ -1,0 +1,20 @@
+{
+  "name": "@lunch/market",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Market service: buys missing ingredients at the farmers market with retries, backoff and bounded concurrency.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@aws-sdk/client-sqs": "^3.1164.0",
+    "@aws-sdk/lib-dynamodb": "^3.1164.0",
+    "@lunch/contracts": "1.0.0",
+    "@lunch/shared": "1.0.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.164"
+  }
+}

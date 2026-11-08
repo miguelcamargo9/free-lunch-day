@@ -1,7 +1,8 @@
 import type { SQSEvent } from 'aws-lambda';
 import { describe, expect, it, vi } from 'vitest';
 import { DishDelivered, IngredientsRequested, createEvent } from '@lunch/contracts';
-import { createEventConsumer, createLogger } from '../src/index.js';
+import { z } from 'zod';
+import { createEventConsumer, createJsonQueueConsumer, createLogger } from '../src/index.js';
 
 const dishId = '7c2e4a90-1b3d-4e5f-8a6b-9c0d1e2f3a4b';
 const logger = createLogger('test');
@@ -69,5 +70,17 @@ describe('createEventConsumer', () => {
     const response = await consume(sqsEvent(asEventBridge(requested)));
 
     expect(response.batchItemFailures).toEqual([{ itemIdentifier: 'm0' }]);
+  });
+});
+
+describe('createJsonQueueConsumer', () => {
+  it('validates each message body and reports invalid ones', async () => {
+    const handle = vi.fn(async () => {});
+    const consume = createJsonQueueConsumer(z.object({ id: z.string() }), handle, logger);
+
+    const response = await consume(sqsEvent({ id: 'a' }, { id: 1 }));
+
+    expect(handle).toHaveBeenCalledWith({ id: 'a' });
+    expect(response.batchItemFailures).toEqual([{ itemIdentifier: 'm1' }]);
   });
 });

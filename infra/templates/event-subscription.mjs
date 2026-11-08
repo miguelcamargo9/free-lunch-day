@@ -1,31 +1,13 @@
 // Usage: set custom.subscription.detailTypes and add this file to the service's resources.
-const getArn = (logicalId) => ({ 'Fn::GetAtt': [logicalId, 'Arn'] });
+import { getArn, queueName, queueWithDeadLetter } from './lib/queue.mjs';
 
 export default async ({ resolveVariable }) => {
-  const {
-    detailTypes,
-    visibilityTimeout = 60,
-    maxReceiveCount = 5,
-  } = await resolveVariable('self:custom.subscription');
-  const service = await resolveVariable('self:service');
-  const stage = await resolveVariable('sls:stage');
+  const { detailTypes, ...queueOptions } = await resolveVariable('self:custom.subscription');
   const eventBusArn = await resolveVariable('param:eventBusArn');
-  const queueName = `${service}-${stage}-events`;
 
   return {
     Resources: {
-      EventsDeadLetterQueue: {
-        Type: 'AWS::SQS::Queue',
-        Properties: { QueueName: `${queueName}-dlq`, MessageRetentionPeriod: 1209600 },
-      },
-      EventsQueue: {
-        Type: 'AWS::SQS::Queue',
-        Properties: {
-          QueueName: queueName,
-          VisibilityTimeout: visibilityTimeout,
-          RedrivePolicy: { deadLetterTargetArn: getArn('EventsDeadLetterQueue'), maxReceiveCount },
-        },
-      },
+      ...queueWithDeadLetter('Events', await queueName(resolveVariable, 'events'), queueOptions),
       EventsRule: {
         Type: 'AWS::Events::Rule',
         Properties: {
