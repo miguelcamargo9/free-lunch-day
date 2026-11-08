@@ -8,27 +8,27 @@ Entregar un sistema **serverless en AWS, orientado a eventos y desplegado públi
 
 Criterios de éxito medibles:
 
-| Criterio | Meta |
-| --- | --- |
-| Respuesta del botón de pedido | `202 Accepted`, p95 < 300 ms |
-| Pedido de 1.000 platos en una ráfaga | 0 platos perdidos, 0 duplicados, todos en `DELIVERED` |
-| Inventario | Nunca negativo, ni bajo 50 gerentes haciendo clic a la vez |
-| Reinicios / redeploys | El estado sobrevive (persistencia en DynamoDB) |
-| Automatización | Cero pasos manuales del pedido a la entrega |
-| IA | Funcional en el despliegue, con guardarraíles y documentada |
+| Criterio                             | Meta                                                        |
+| ------------------------------------ | ----------------------------------------------------------- |
+| Respuesta del botón de pedido        | `202 Accepted`, p95 < 300 ms                                |
+| Pedido de 1.000 platos en una ráfaga | 0 platos perdidos, 0 duplicados, todos en `DELIVERED`       |
+| Inventario                           | Nunca negativo, ni bajo 50 gerentes haciendo clic a la vez  |
+| Reinicios / redeploys                | El estado sobrevive (persistencia en DynamoDB)              |
+| Automatización                       | Cero pasos manuales del pedido a la entrega                 |
+| IA                                   | Funcional en el despliegue, con guardarraíles y documentada |
 
 ## 2. Lectura del enunciado y supuestos
 
-| Tema | Lo que dice el reto | Cómo lo interpreto |
-| --- | --- | --- |
-| Pedido | El gerente pide "X" platos con un botón | `POST /orders { quantity }`, con límite por clic (1–500) e `Idempotency-Key` contra doble clic |
-| Recetas | 6 recetas definidas por mí, cada una con ingredientes de la lista | 6 recetas fijas con cantidades por ingrediente; entre todas cubren los 10 ingredientes |
-| Bodega | Arranca con 5 unidades de cada ingrediente | Seed inicial de 5 × 10 ingredientes; un "reinicio de jornada" vuelve a ese estado |
-| Plaza | `GET /buy?ingredient=x` → `{ quantitySold }`; 0 = no disponible | Verificado: responde `{"quantitySold":2}`; un ingrediente inválido da `400`. Puede vender menos o más de lo que falta |
-| Lo comprado | Se compra "lo faltante" | Todo lo vendido entra a la bodega; lo que cubre al plato que lo pidió se le asigna primero, el sobrante queda como stock general |
-| Descuento | Se descuenta al preparar | La **reserva** atómica del ingrediente es el descuento; el plato pasa a `PREPARING` solo cuando tiene todo |
-| Falta de ingrediente | No se especifica un límite | Un plato **nunca falla por falta de ingredientes**: espera y se reintenta la compra con backoff. Solo errores técnicos van a DLQ |
-| Stack | Node/TS sin Express, Nest u otros frameworks; serverless es PLUS | Lambdas con handlers puros en TypeScript; solo librerías utilitarias (AWS SDK, Powertools, zod) |
+| Tema                 | Lo que dice el reto                                               | Cómo lo interpreto                                                                                                               |
+| -------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Pedido               | El gerente pide "X" platos con un botón                           | `POST /orders { quantity }`, con límite por clic (1–500) e `Idempotency-Key` contra doble clic                                   |
+| Recetas              | 6 recetas definidas por mí, cada una con ingredientes de la lista | 6 recetas fijas con cantidades por ingrediente; entre todas cubren los 10 ingredientes                                           |
+| Bodega               | Arranca con 5 unidades de cada ingrediente                        | Seed inicial de 5 × 10 ingredientes; un "reinicio de jornada" vuelve a ese estado                                                |
+| Plaza                | `GET /buy?ingredient=x` → `{ quantitySold }`; 0 = no disponible   | Verificado: responde `{"quantitySold":2}`; un ingrediente inválido da `400`. Puede vender menos o más de lo que falta            |
+| Lo comprado          | Se compra "lo faltante"                                           | Todo lo vendido entra a la bodega; lo que cubre al plato que lo pidió se le asigna primero, el sobrante queda como stock general |
+| Descuento            | Se descuenta al preparar                                          | La **reserva** atómica del ingrediente es el descuento; el plato pasa a `PREPARING` solo cuando tiene todo                       |
+| Falta de ingrediente | No se especifica un límite                                        | Un plato **nunca falla por falta de ingredientes**: espera y se reintenta la compra con backoff. Solo errores técnicos van a DLQ |
+| Stack                | Node/TS sin Express, Nest u otros frameworks; serverless es PLUS  | Lambdas con handlers puros en TypeScript; solo librerías utilitarias (AWS SDK, Powertools, zod)                                  |
 
 ## 3. Arquitectura en una página
 
@@ -55,13 +55,13 @@ flowchart LR
   AI -. lectura .-> ORD & WH & MK
 ```
 
-| Servicio | Responsabilidad | Datos propios |
-| --- | --- | --- |
-| `orders` | Recibe el pedido, asigna recetas aleatorias, orquesta el ciclo de vida del plato | `orders`, `dishes` + catálogo de recetas |
-| `warehouse` | Inventario, reservas atómicas y parciales por plato | `inventory`, `reservations` |
-| `market` | Compra en la plaza con reintentos, backoff y concurrencia limitada | `purchases` (historial) |
-| `realtime` | Empuja los cambios al dashboard por WebSocket | `connections` |
-| `ai-assistant` | Copiloto del gerente con tool calling sobre datos en vivo | — (solo lectura) |
+| Servicio       | Responsabilidad                                                                  | Datos propios                            |
+| -------------- | -------------------------------------------------------------------------------- | ---------------------------------------- |
+| `orders`       | Recibe el pedido, asigna recetas aleatorias, orquesta el ciclo de vida del plato | `orders`, `dishes` + catálogo de recetas |
+| `warehouse`    | Inventario, reservas atómicas y parciales por plato                              | `inventory`, `reservations`              |
+| `market`       | Compra en la plaza con reintentos, backoff y concurrencia limitada               | `purchases` (historial)                  |
+| `realtime`     | Empuja los cambios al dashboard por WebSocket                                    | `connections`                            |
+| `ai-assistant` | Copiloto del gerente con tool calling sobre datos en vivo                        | — (solo lectura)                         |
 
 ### Ciclo de vida de un plato
 
@@ -89,14 +89,14 @@ Viven en `packages/contracts` como esquemas zod versionados. Son la única fuent
 
 ## 4. Decisiones clave
 
-| Decisión | Elegido | Alternativa descartada | ADR |
-| --- | --- | --- | --- |
-| Despliegue | Serverless Framework v4, Lambda Node.js 22 + esbuild, ARM64 | Contenedores en ECS/EC2 con Dockerfile por servicio | [0001](adr/0001-serverless-over-containers.md) |
-| Comunicación | EventBridge + SQS con DLQ por consumidor | HTTP síncrono entre servicios; SNS fan-out | [0002](adr/0002-event-bus-communication.md) |
-| Concurrencia del inventario | Reservas atómicas y parciales con `UpdateItem` condicional | Cola FIFO con un solo grupo que serializa la bodega | [0003](adr/0003-atomic-partial-reservations.md) |
-| Persistencia | DynamoDB on-demand, una tabla por servicio | RDS (costo y servidor que mantener) | 0001 |
-| Repositorio | Monorepo con npm workspaces | Un repo por servicio | — |
-| Desarrollo local | `docker-compose` con LocalStack y DynamoDB Local | Desarrollar solo contra AWS | 0001 |
+| Decisión                    | Elegido                                                     | Alternativa descartada                              | ADR                                             |
+| --------------------------- | ----------------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------- |
+| Despliegue                  | Serverless Framework v4, Lambda Node.js 22 + esbuild, ARM64 | Contenedores en ECS/EC2 con Dockerfile por servicio | [0001](adr/0001-serverless-over-containers.md)  |
+| Comunicación                | EventBridge + SQS con DLQ por consumidor                    | HTTP síncrono entre servicios; SNS fan-out          | [0002](adr/0002-event-bus-communication.md)     |
+| Concurrencia del inventario | Reservas atómicas y parciales con `UpdateItem` condicional  | Cola FIFO con un solo grupo que serializa la bodega | [0003](adr/0003-atomic-partial-reservations.md) |
+| Persistencia                | DynamoDB on-demand, una tabla por servicio                  | RDS (costo y servidor que mantener)                 | 0001                                            |
+| Repositorio                 | Monorepo con npm workspaces                                 | Un repo por servicio                                | —                                               |
+| Desarrollo local            | `docker-compose` con LocalStack y DynamoDB Local            | Desarrollar solo contra AWS                         | 0001                                            |
 
 ## 5. Los tres problemas difíciles
 
@@ -117,6 +117,7 @@ Guardarraíles: límite de peticiones por minuto, timeout, máximo de tokens y r
 Regla: **algo funcional desplegado el día 2**, y el día 7 solo para pulir y documentar. Cada tarea es un issue de 1–3 horas con criterio de aceptación; cada PR referencia su issue.
 
 ### Día 1 — Diseño y base
+
 - [ ] T-01 `docs/PLANNING.md` (este documento), commit antes del código
 - [ ] T-02 `docs/ARCHITECTURE.md` con diagramas y ADRs 0001–0003
 - [ ] T-03 Monorepo: npm workspaces, TS estricto, ESLint, Prettier, Vitest
@@ -126,34 +127,40 @@ Regla: **algo funcional desplegado el día 2**, y el día 7 solo para pulir y do
 - [ ] T-07 Cuenta AWS con alarma de presupuesto en USD 5
 
 ### Día 2 — Esqueleto de punta a punta
+
 - [ ] T-08 Infra compartida: bus de EventBridge
 - [ ] T-09 `orders`: `POST /orders`, fan-out a platos, 6 recetas, tabla de platos
 - [ ] T-10 `warehouse`: seed de inventario y reserva simple (camino feliz)
 - [ ] T-11 Camino feliz desplegado: pedido → bodega → entrega, sin plaza todavía
 
 ### Día 3 — Bodega y plaza
+
 - [ ] T-12 Reservas atómicas y parciales (tests primero)
 - [ ] T-13 `market`: cliente de la plaza con timeout, backoff con `DelaySeconds` y concurrencia reservada
 - [ ] T-14 Asignación de compras al plato que las pidió y sobrante al stock
 - [ ] T-15 Historial de compras
 
 ### Día 4 — Robustez
+
 - [ ] T-16 Idempotencia en todos los handlers y máquina de estados condicional
 - [ ] T-17 DLQs, `ReportBatchItemFailures` y alarmas
 - [ ] T-18 Primera prueba de carga (k6) y corrección de lo que falle
 
 ### Día 5 — Frontend y tiempo real
+
 - [ ] T-19 `realtime`: API Gateway WebSocket + consumidor de eventos
 - [ ] T-20 Dashboard: botón de pedido, contadores, órdenes en preparación, inventario, historial de compras, historial de pedidos, recetas
 - [ ] T-21 Respaldo por polling y despliegue en S3 + CloudFront
 
 ### Día 6 — IA y observabilidad
+
 - [ ] T-22 `ai-assistant` con tool calling y guardarraíles
 - [ ] T-23 Panel del copiloto en el dashboard
 - [ ] T-24 Powertools (logger con `correlationId = dishId`, tracer, métricas) y dashboard de CloudWatch
 - [ ] T-25 Prueba de carga final con resultados en `docs/load-testing.md`
 
 ### Día 7 — Pulido y entrega
+
 - [ ] T-26 Prueba de usuario con alguien no técnico y ajustes
 - [ ] T-27 README de 5 minutos, `docs/ai.md`, revisión final del código
 - [ ] T-28 Repo privado con `scouting@alegra.com` como colaborador, envío por el formulario
@@ -171,13 +178,13 @@ Una tarea está terminada cuando:
 
 ## 9. Riesgos
 
-| Riesgo | Mitigación |
-| --- | --- |
-| El evaluador espera "microservicios dockerizados" | Explicar en README que serverless es la opción PLUS; `docker-compose` con LocalStack para desarrollo local |
-| La plaza devuelve 0 muchas veces y los platos tardan | Backoff con tope de 60 s; la UI muestra "esperando ingrediente X" y la IA lo explica |
-| Costos inesperados en AWS o en el LLM | Alarma de presupuesto, DynamoDB on-demand, límites de concurrencia y de tokens |
-| Cold starts en la demo | esbuild con bundles pequeños, ARM64 |
-| La URL deja de funcionar durante la revisión | No destruir el stack hasta recibir respuesta; probar la URL desde otra red el día del envío |
+| Riesgo                                               | Mitigación                                                                                                 |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| El evaluador espera "microservicios dockerizados"    | Explicar en README que serverless es la opción PLUS; `docker-compose` con LocalStack para desarrollo local |
+| La plaza devuelve 0 muchas veces y los platos tardan | Backoff con tope de 60 s; la UI muestra "esperando ingrediente X" y la IA lo explica                       |
+| Costos inesperados en AWS o en el LLM                | Alarma de presupuesto, DynamoDB on-demand, límites de concurrencia y de tokens                             |
+| Cold starts en la demo                               | esbuild con bundles pequeños, ARM64                                                                        |
+| La URL deja de funcionar durante la revisión         | No destruir el stack hasta recibir respuesta; probar la URL desde otra red el día del envío                |
 
 ## 10. Uso de IA en el desarrollo
 
