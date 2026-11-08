@@ -16,6 +16,7 @@ provider:
     EVENT_BUS_NAME: ${param:eventBusName}
     ORDERS_TABLE: !Ref OrdersTable
     DISHES_TABLE: !Ref DishesTable
+    DISHES_BY_ORDER_INDEX: byOrder
     NODE_OPTIONS: --enable-source-maps
   httpApi:
     cors: true
@@ -23,9 +24,11 @@ provider:
     role:
       statements:
         - Effect: Allow
-          Action:
-            [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:ConditionCheckItem]
+          Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
           Resource: [!GetAtt OrdersTable.Arn, !GetAtt DishesTable.Arn]
+        - Effect: Allow
+          Action: dynamodb:Query
+          Resource: !Join ['', [!GetAtt DishesTable.Arn, '/index/byOrder']]
         - Effect: Allow
           Action: events:PutEvents
           Resource: ${param:eventBusArn}
@@ -73,6 +76,14 @@ resources:
           BillingMode: PAY_PER_REQUEST
           AttributeDefinitions:
             - { AttributeName: dishId, AttributeType: S }
+            - { AttributeName: orderId, AttributeType: S }
           KeySchema:
             - { AttributeName: dishId, KeyType: HASH }
+          GlobalSecondaryIndexes:
+            - IndexName: byOrder
+              KeySchema:
+                - { AttributeName: orderId, KeyType: HASH }
+              Projection:
+                ProjectionType: INCLUDE
+                NonKeyAttributes: [status]
   - ${file(../../infra/templates/event-subscription.mjs)}

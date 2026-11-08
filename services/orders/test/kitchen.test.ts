@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { RecordingPublisher, fixedClock } from '@lunch/shared/testing';
 import { Kitchen } from '../src/application/kitchen.js';
+import { OrderQueries } from '../src/application/order-queries.js';
 import { RECIPES, type Recipe } from '../src/domain/recipes.js';
 import { InMemoryOrderRepository } from './in-memory-order-repository.js';
 
@@ -10,11 +11,13 @@ describe('Kitchen', () => {
   let repository: InMemoryOrderRepository;
   let publisher: RecordingPublisher;
   let kitchen: Kitchen;
+  let queries: OrderQueries;
 
   beforeEach(() => {
     repository = new InMemoryOrderRepository();
     publisher = new RecordingPublisher();
     kitchen = new Kitchen(repository, publisher, () => firstRecipe, fixedClock());
+    queries = new OrderQueries(repository);
   });
 
   it('places an order and requests the batch asynchronously', async () => {
@@ -31,7 +34,7 @@ describe('Kitchen', () => {
     await kitchen.startBatch(order.orderId, 4);
 
     expect(repository.dishes.size).toBe(4);
-    expect(repository.orders.get(order.orderId)?.counts.PENDING).toBe(4);
+    expect((await queries.findOrder(order.orderId))?.counts.PENDING).toBe(4);
     expect(publisher.ofType('DishCreated')).toHaveLength(4);
     const requested = publisher.ofType('IngredientsRequested')[0]?.detail.payload;
     expect(requested).toMatchObject({ ingredients: firstRecipe.ingredients });
@@ -44,7 +47,7 @@ describe('Kitchen', () => {
     await kitchen.startBatch(order.orderId, 4);
 
     expect(repository.dishes.size).toBe(4);
-    expect(repository.orders.get(order.orderId)?.counts.PENDING).toBe(4);
+    expect((await queries.findOrder(order.orderId))?.counts.PENDING).toBe(4);
   });
 
   it('prepares and delivers a dish once its ingredients are reserved', async () => {
@@ -55,7 +58,7 @@ describe('Kitchen', () => {
     await kitchen.prepareAndDeliver(dishId as string);
 
     expect(repository.dishes.get(dishId as string)?.status).toBe('DELIVERED');
-    expect(repository.orders.get(order.orderId)?.counts).toEqual({
+    expect((await queries.findOrder(order.orderId))?.counts).toEqual({
       PENDING: 0,
       WAITING_INGREDIENTS: 0,
       PREPARING: 0,
@@ -64,7 +67,7 @@ describe('Kitchen', () => {
     expect(publisher.ofType('DishDelivered')).toHaveLength(1);
   });
 
-  it('delivering twice keeps the counters right', async () => {
+  it('delivering twice keeps the counts right', async () => {
     const order = await kitchen.placeOrder(1);
     await kitchen.startBatch(order.orderId, 1);
     const [dishId] = repository.dishes.keys();
@@ -72,6 +75,6 @@ describe('Kitchen', () => {
     await kitchen.prepareAndDeliver(dishId as string);
     await kitchen.prepareAndDeliver(dishId as string);
 
-    expect(repository.orders.get(order.orderId)?.counts.DELIVERED).toBe(1);
+    expect((await queries.findOrder(order.orderId))?.counts.DELIVERED).toBe(1);
   });
 });

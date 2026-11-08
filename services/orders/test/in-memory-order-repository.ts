@@ -9,7 +9,7 @@ export class InMemoryOrderRepository implements OrderRepository {
 
   saveOrder(order: Order): Promise<void> {
     if (this.orders.has(order.orderId)) return Promise.reject(new Error('duplicate order'));
-    this.orders.set(order.orderId, structuredClone(order));
+    this.orders.set(order.orderId, order);
     return Promise.resolve();
   }
 
@@ -21,7 +21,6 @@ export class InMemoryOrderRepository implements OrderRepository {
     const stored = this.dishes.get(dish.dishId);
     if (stored) return Promise.resolve(stored);
     this.dishes.set(dish.dishId, dish);
-    this.addToCounts(dish.orderId, dish.status, 1);
     return Promise.resolve(dish);
   }
 
@@ -33,13 +32,11 @@ export class InMemoryOrderRepository implements OrderRepository {
     const stored = this.dishes.get(dish.dishId);
     if (stored?.status !== dish.status) return Promise.resolve(false);
     this.dishes.set(dish.dishId, { ...stored, status: to, updatedAt: at });
-    this.addToCounts(dish.orderId, dish.status, -1);
-    this.addToCounts(dish.orderId, to, 1);
     return Promise.resolve(true);
   }
 
-  private addToCounts(orderId: string, status: DishStatus, delta: number): void {
-    const order = this.orders.get(orderId);
-    if (order) order.counts[status] += delta;
+  listDishStatuses(orderId: string): Promise<DishStatus[]> {
+    const dishes = [...this.dishes.values()].filter((dish) => dish.orderId === orderId);
+    return Promise.resolve(dishes.map((dish) => dish.status));
   }
 }

@@ -11,6 +11,7 @@ import { DynamoOrderRepository } from './infrastructure/dynamo-order-repository.
 const repository = new DynamoOrderRepository(createDocumentClient(), {
   orders: requiredEnv('ORDERS_TABLE'),
   dishes: requiredEnv('DISHES_TABLE'),
+  dishesByOrderIndex: requiredEnv('DISHES_BY_ORDER_INDEX'),
 });
 
 export const logger = createLogger('orders');

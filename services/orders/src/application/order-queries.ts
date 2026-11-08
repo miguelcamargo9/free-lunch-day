@@ -1,12 +1,16 @@
-import type { Order } from '../domain/order.js';
+import { countByStatus, type OrderSummary } from '../domain/order.js';
 import { RECIPES, type Recipe } from '../domain/recipes.js';
 import type { OrderRepository } from './ports.js';
 
 export class OrderQueries {
   constructor(private readonly repository: OrderRepository) {}
 
-  findOrder(orderId: string): Promise<Order | undefined> {
-    return this.repository.findOrder(orderId);
+  async findOrder(orderId: string): Promise<OrderSummary | undefined> {
+    const [order, statuses] = await Promise.all([
+      this.repository.findOrder(orderId),
+      this.repository.listDishStatuses(orderId),
+    ]);
+    return order && { ...order, counts: countByStatus(statuses) };
   }
 
   listRecipes(): readonly Recipe[] {

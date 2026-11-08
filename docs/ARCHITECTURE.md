@@ -100,14 +100,14 @@ Every event is defined in [`packages/contracts`](../packages/contracts/src/event
 
 | Service   | Table          | Key                       | Main attributes                                                |
 | --------- | -------------- | ------------------------- | -------------------------------------------------------------- |
-| orders    | `orders`       | `orderId`                 | `quantity`, `createdAt`, `counts` (dishes per status)          |
-| orders    | `dishes`       | `dishId`                  | `orderId`, `recipeId`, `status`, `createdAt`, `updatedAt`      |
+| orders    | `orders`       | `orderId`                 | `quantity`, `createdAt`                                        |
+| orders    | `dishes`       | `dishId`; GSI `byOrder`   | `orderId`, `recipeId`, `status`, `createdAt`, `updatedAt`      |
 | warehouse | `inventory`    | `ingredient`              | `stock` (never negative, enforced by a condition)              |
 | warehouse | `reservations` | `dishId`                  | per ingredient: `needed`, `reserved`                           |
 | market    | `purchases`    | `purchaseId`; GSI by date | `dishId`, `ingredient`, `requested`, `quantitySold`, `attempt` |
 | realtime  | `connections`  | `connectionId`            | 2 h TTL                                                        |
 
-A dish status change and its order's `counts` are written in one DynamoDB transaction, so the counters never drift from the dishes.
+An order's per-status counts are computed on read from its dishes (GSI `byOrder`). Stored counters on the order item would make it a hot item: every dish of a burst writes to it and concurrent transactions on one item get rejected (`TransactionConflict`).
 
 ## Ingredient reservation
 

@@ -1,7 +1,8 @@
 import {
   GetCommand,
   PutCommand,
-  TransactWriteCommand,
+  UpdateCommand,
+  paginateQuery,
   type DynamoDBDocumentClient,
 } from '@aws-sdk/lib-dynamodb';
 import type { DishStatus } from '@lunch/contracts';
@@ -13,6 +14,7 @@ import type { Order } from '../domain/order.js';
 export interface OrderTables {
   readonly orders: string;
   readonly dishes: string;
+  readonly dishesByOrderIndex: string;
 }
 
 export class DynamoOrderRepository implements OrderRepository {
@@ -41,17 +43,10 @@ export class DynamoOrderRepository implements OrderRepository {
   async createDish(dish: Dish): Promise<Dish> {
     try {
       await this.client.send(
-        new TransactWriteCommand({
-          TransactItems: [
-            {
-              Put: {
-                TableName: this.tables.dishes,
-                Item: dish,
-                ConditionExpression: 'attribute_not_exists(dishId)',
-              },
-            },
-            this.countsUpdate(dish.orderId, { [dish.status]: 1 }),
-          ],
+        new PutCommand({
+          TableName: this.tables.dishes,
+          Item: dish,
+          ConditionExpression: 'attribute_not_exists(dishId)',
         }),
       );
       return dish;
@@ -73,20 +68,13 @@ export class DynamoOrderRepository implements OrderRepository {
   async updateDishStatus(dish: Dish, to: DishStatus, at: string): Promise<boolean> {
     try {
       await this.client.send(
-        new TransactWriteCommand({
-          TransactItems: [
-            {
-              Update: {
-                TableName: this.tables.dishes,
-                Key: { dishId: dish.dishId },
-                UpdateExpression: 'SET #status = :to, updatedAt = :at',
-                ConditionExpression: '#status = :from',
-                ExpressionAttributeNames: { '#status': 'status' },
-                ExpressionAttributeValues: { ':from': dish.status, ':to': to, ':at': at },
-              },
-            },
-            this.countsUpdate(dish.orderId, { [dish.status]: -1, [to]: 1 }),
-          ],
+        new UpdateCommand({
+          TableName: this.tables.dishes,
+          Key: { dishId: dish.dishId },
+          UpdateExpression: 'SET #status = :to, updatedAt = :at',
+          ConditionExpression: '#status = :from',
+          ExpressionAttributeNames: { '#status': 'status' },
+          ExpressionAttributeValues: { ':from': dish.status, ':to': to, ':at': at },
         }),
       );
       return true;
@@ -96,20 +84,22 @@ export class DynamoOrderRepository implements OrderRepository {
     }
   }
 
-  private countsUpdate(orderId: string, deltas: Partial<Record<DishStatus, number>>) {
-    const entries = Object.entries(deltas);
-    return {
-      Update: {
-        TableName: this.tables.orders,
-        Key: { orderId },
-        UpdateExpression: `SET ${entries.map((_, i) => `counts.#s${i} = counts.#s${i} + :d${i}`).join(', ')}`,
-        ExpressionAttributeNames: Object.fromEntries(
-          entries.map(([status], i) => [`#s${i}`, status]),
-        ),
-        ExpressionAttributeValues: Object.fromEntries(
-          entries.map(([, delta], i) => [`:d${i}`, delta]),
-        ),
+  async listDishStatuses(orderId: string): Promise<DishStatus[]> {
+    const pages = paginateQuery(
+      { client: this.client },
+      {
+        TableName: this.tables.dishes,
+        IndexName: this.tables.dishesByOrderIndex,
+        KeyConditionExpression: 'orderId = :orderId',
+        ProjectionExpression: '#status',
+        ExpressionAttributeNames: { '#status': 'status' },
+        ExpressionAttributeValues: { ':orderId': orderId },
       },
-    };
+    );
+    const statuses: DishStatus[] = [];
+    for await (const page of pages) {
+      statuses.push(...(page.Items ?? []).map((item) => item.status as DishStatus));
+    }
+    return statuses;
   }
 }

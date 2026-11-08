@@ -15,7 +15,7 @@ import {
   type EventPublisher,
 } from '@lunch/shared';
 import { canTransition, hasReached, toDishRef, type Dish } from '../domain/dish.js';
-import { newOrder, type Order } from '../domain/order.js';
+import type { Order } from '../domain/order.js';
 import { getRecipe, pickRandomRecipe, type Recipe } from '../domain/recipes.js';
 import type { OrderRepository } from './ports.js';
 
@@ -31,7 +31,7 @@ export class Kitchen {
   ) {}
 
   async placeOrder(quantity: number): Promise<Order> {
-    const order = newOrder(crypto.randomUUID(), quantity, this.now());
+    const order: Order = { orderId: crypto.randomUUID(), quantity, createdAt: this.now() };
     await this.repository.saveOrder(order);
     await this.publisher.publish([
       createEvent(OrderBatchRequested, { orderId: order.orderId, quantity }, order.orderId),

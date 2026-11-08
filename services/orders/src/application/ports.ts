@@ -8,4 +8,5 @@ export interface OrderRepository {
   createDish(dish: Dish): Promise<Dish>;
   findDish(dishId: string): Promise<Dish | undefined>;
   updateDishStatus(dish: Dish, to: DishStatus, at: string): Promise<boolean>;
+  listDishStatuses(orderId: string): Promise<DishStatus[]>;
 }
