@@ -1,0 +1,75 @@
+org: miguelcamargo9
+app: free-lunch-day
+service: lunch-warehouse
+
+provider:
+  name: aws
+  runtime: nodejs22.x
+  architecture: arm64
+  region: us-east-1
+  stage: ${opt:stage, 'dev'}
+  memorySize: 256
+  timeout: 10
+  logRetentionInDays: 7
+  environment:
+    EVENT_BUS_NAME: ${param:eventBusName}
+    INVENTORY_TABLE: !Ref InventoryTable
+    RESERVATIONS_TABLE: !Ref ReservationsTable
+    NODE_OPTIONS: --enable-source-maps
+  httpApi:
+    cors: true
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            [
+              dynamodb:GetItem,
+              dynamodb:PutItem,
+              dynamodb:UpdateItem,
+              dynamodb:Scan,
+              dynamodb:ConditionCheckItem,
+            ]
+          Resource: [!GetAtt InventoryTable.Arn, !GetAtt ReservationsTable.Arn]
+        - Effect: Allow
+          Action: events:PutEvents
+          Resource: ${param:eventBusArn}
+
+functions:
+  getInventory:
+    handler: src/handlers/get-inventory.handler
+    events:
+      - httpApi: GET /inventory
+  warehouseEvents:
+    handler: src/handlers/warehouse-events.handler
+    timeout: 30
+    events:
+      - sqs:
+          arn: !GetAtt EventsQueue.Arn
+          batchSize: 10
+          functionResponseType: ReportBatchItemFailures
+
+custom:
+  subscription:
+    detailTypes: [IngredientsRequested]
+    visibilityTimeout: 180
+
+resources:
+  - Resources:
+      InventoryTable:
+        Type: AWS::DynamoDB::Table
+        Properties:
+          BillingMode: PAY_PER_REQUEST
+          AttributeDefinitions:
+            - { AttributeName: ingredient, AttributeType: S }
+          KeySchema:
+            - { AttributeName: ingredient, KeyType: HASH }
+      ReservationsTable:
+        Type: AWS::DynamoDB::Table
+        Properties:
+          BillingMode: PAY_PER_REQUEST
+          AttributeDefinitions:
+            - { AttributeName: dishId, AttributeType: S }
+          KeySchema:
+            - { AttributeName: dishId, KeyType: HASH }
+  - ${file(../../infra/templates/event-subscription.mjs)}
