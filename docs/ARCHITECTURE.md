@@ -1,13 +1,13 @@
-# Arquitectura
+# Architecture
 
-El sistema son cinco microservicios serverless en AWS que se comunican solo por eventos. Esta página es la referencia viva del diseño. La vista general y el plan están en [PLANNING.md](PLANNING.md), y el porqué de cada decisión en [adr/](adr/).
+The system is five serverless microservices on AWS that communicate only through events. This page is the living reference for the design. The overview and the plan are in [PLANNING.md](PLANNING.md), and the reasoning behind each decision is in [adr/](adr/).
 
-## Componentes
+## Components
 
 ```mermaid
 flowchart LR
-  subgraph Cliente
-    UI[Dashboard React<br/>S3 + CloudFront]
+  subgraph Client
+    UI[React dashboard<br/>S3 + CloudFront]
   end
 
   subgraph AWS
@@ -17,13 +17,13 @@ flowchart LR
 
     subgraph orders
       O1[λ createOrder] --> OT[(orders / dishes)]
-      O2[λ kitchen] --> OT
+      O2[λ kitchenEvents] --> OT
     end
     subgraph warehouse
       W1[λ reserve] --> WT[(inventory / reservations)]
     end
     subgraph market
-      M1[λ buy<br/>concurrencia 5] --> MT[(purchases)]
+      M1[λ buy<br/>concurrency 5] --> MT[(purchases)]
     end
     subgraph realtime
       R1[λ broadcast] --> RT[(connections)]
@@ -41,34 +41,34 @@ flowchart LR
   M1 --> EXT
 ```
 
-Cada consumidor tiene su cola SQS con DLQ entre el bus y el Lambda. La cola absorbe ráfagas, reintenta y aplica backpressure. Una regla de EventBridge por consumidor filtra solo los `detail-type` que le interesan.
+Each consumer has its own SQS queue with a DLQ between the bus and its Lambda. The queue absorbs bursts, retries and applies backpressure. One EventBridge rule per consumer forwards only the `detail-type`s it cares about. The rule, queue, DLQ and queue policy come from one shared template, [`infra/templates/event-subscription.mjs`](../infra/templates/event-subscription.mjs).
 
-## Flujo de un plato
+## Life of a dish
 
 ```mermaid
 sequenceDiagram
   autonumber
-  actor G as Gerente
+  actor M as Manager
   participant O as orders
   participant W as warehouse
-  participant M as market
-  participant P as Plaza (API)
+  participant K as market
+  participant P as Market API
 
-  G->>O: POST /orders {quantity: N}
-  O-->>G: 202 {orderId}
-  O->>O: OrderBatchRequested → N × DishCreated (receta aleatoria)
+  M->>O: POST /orders {quantity: N}
+  O-->>M: 202 {orderId}
+  O->>O: OrderBatchRequested → N × DishCreated (random recipe)
   O->>W: IngredientsRequested {dishId, ingredients}
-  W->>W: reserva atómica de lo que haya
-  alt falta algo
-    W->>M: IngredientsShortage {dishId, missing}
-    loop por ingrediente hasta completar
-      M->>P: GET /buy?ingredient=x
+  W->>W: atomically reserve whatever is in stock
+  alt something is missing
+    W->>K: IngredientsShortage {dishId, missing}
+    loop per ingredient until complete
+      K->>P: GET /buy?ingredient=x
       alt quantitySold > 0
-        M->>W: IngredientPurchased
-        W->>W: asigna al plato, sobrante al stock
+        K->>W: IngredientPurchased
+        W->>W: give it to the dish, surplus to stock
       else quantitySold = 0
-        M->>M: reencola con DelaySeconds (backoff)
-        M-->>W: IngredientUnavailable (informativo)
+        K->>K: requeue with DelaySeconds (backoff)
+        K-->>W: IngredientUnavailable (informational)
       end
     end
   end
@@ -76,9 +76,9 @@ sequenceDiagram
   O->>O: PREPARING → DishPrepared → DELIVERED → DishDelivered
 ```
 
-## Contratos
+## Contracts
 
-Todos los eventos están definidos en [`packages/contracts`](../packages/contracts/src/events/index.ts) con zod. El `detail` de cada evento de EventBridge tiene siempre la misma forma:
+Every event is defined in [`packages/contracts`](../packages/contracts/src/events/index.ts) with zod. The `detail` of every EventBridge event has the same shape:
 
 ```json
 {
@@ -88,45 +88,46 @@ Todos los eventos están definidos en [`packages/contracts`](../packages/contrac
     "version": 1,
     "correlationId": "dishId"
   },
-  "payload": { "...": "según el evento" }
+  "payload": { "...": "per event" }
 }
 ```
 
-- El productor valida al crear el evento (`createEvent`), y el consumidor valida al recibirlo.
-- Un cambio incompatible sube `version` y convive con la versión anterior hasta que todos los consumidores migren.
-- `correlationId` es el `dishId` (o el `orderId` antes de que existan platos). Sirve para seguir un plato de punta a punta en los logs y en X-Ray.
+- The producer validates when it builds the event (`createEvent`), and the consumer validates on receipt.
+- A breaking change bumps `version` and lives alongside the old version until every consumer migrates.
+- `correlationId` is the `dishId` (or the `orderId` before dishes exist). It follows a dish end to end through logs and X-Ray.
 
-## Modelo de datos
+## Data model
 
-| Servicio  | Tabla          | Clave                              | Atributos principales                                          |
-| --------- | -------------- | ---------------------------------- | -------------------------------------------------------------- |
-| orders    | `orders`       | `PK=ORDER#id`                      | `quantity`, `createdAt`, contadores por estado                 |
-| orders    | `dishes`       | `PK=DISH#id`; GSI por `status`     | `orderId`, `recipeId`, `status`, timestamps por transición     |
-| warehouse | `inventory`    | `PK=INGREDIENT#name`               | `stock` (nunca negativo, por condición)                        |
-| warehouse | `reservations` | `PK=DISH#id`, `SK=INGREDIENT#name` | `needed`, `reserved`                                           |
-| market    | `purchases`    | `PK=PURCHASE#id`; GSI por fecha    | `dishId`, `ingredient`, `requested`, `quantitySold`, `attempt` |
-| realtime  | `connections`  | `PK=CONNECTION#id`                 | TTL de 2 h                                                     |
+| Service   | Table          | Key                       | Main attributes                                                |
+| --------- | -------------- | ------------------------- | -------------------------------------------------------------- |
+| orders    | `orders`       | `orderId`                 | `quantity`, `createdAt`, `counts` (dishes per status)          |
+| orders    | `dishes`       | `dishId`                  | `orderId`, `recipeId`, `status`, `createdAt`, `updatedAt`      |
+| warehouse | `inventory`    | `ingredient`              | `stock` (never negative, enforced by a condition)              |
+| warehouse | `reservations` | `dishId`                  | per ingredient: `needed`, `reserved`                           |
+| market    | `purchases`    | `purchaseId`; GSI by date | `dishId`, `ingredient`, `requested`, `quantitySold`, `attempt` |
+| realtime  | `connections`  | `connectionId`            | 2 h TTL                                                        |
 
-## Reserva de ingredientes
+A dish status change and its order's `counts` are written in one DynamoDB transaction, so the counters never drift from the dishes.
 
-Algoritmo por ingrediente de un plato, en `warehouse`:
+## Ingredient reservation
 
-1. `faltante = needed − reserved`. Si es 0, terminó.
-2. Lee `stock`; toma `n = min(stock, faltante)`.
-3. `UpdateItem inventory SET stock = stock − n IF stock >= n`. Si la condición falla, otro plato ganó la carrera: vuelve al paso 2.
-4. `UpdateItem reservations SET reserved = reserved + n`.
-5. Si sigue faltando, publica `IngredientsShortage` con lo que falta.
+The algorithm per ingredient of a dish, in `warehouse`:
 
-Cuando llega `IngredientPurchased`, se asigna `min(quantitySold, faltante)` al plato y el resto suma al `stock`. Cuando todos los ingredientes del plato tienen `reserved = needed`, publica `IngredientsReserved` (una sola vez, con escritura condicional).
+1. `missing = needed − reserved`. If it is 0, done.
+2. Read `stock`; take `n = min(stock, missing)`.
+3. In one transaction: `stock = stock − n IF stock >= n` and `reserved = reserved + n IF reserved = :seen`. If a condition fails, another dish won the race: go back to step 2.
+4. If something is still missing, publish `IngredientsShortage` with what is missing.
 
-No hay deadlock: ningún plato espera a que otro libere stock, porque todo faltante se compra. El detalle y las alternativas están en [ADR 0003](adr/0003-atomic-partial-reservations.md).
+When `IngredientPurchased` arrives, `min(quantitySold, missing)` goes to the dish and the rest goes to `stock`. Once every ingredient of the dish has `reserved = needed`, it publishes `IngredientsReserved`.
 
-## Fallos y reintentos
+There is no deadlock: no dish waits for another one to release stock, because every shortage gets bought. Details and alternatives are in [ADR 0003](adr/0003-atomic-partial-reservations.md).
 
-| Situación                   | Comportamiento                                                                                      |
-| --------------------------- | --------------------------------------------------------------------------------------------------- |
-| La plaza vende 0            | Reintento con `DelaySeconds = min(60, 2^intento) + jitter`; el plato sigue en `WAITING_INGREDIENTS` |
-| La plaza da timeout o 5xx   | Error técnico: reintento de SQS; tras 5 intentos va a DLQ y salta la alarma                         |
-| Mensaje duplicado           | Escritura condicional por `dishId + paso`; el duplicado no tiene efecto                             |
-| Falla un mensaje en un lote | `ReportBatchItemFailures`: solo ese mensaje se reintenta                                            |
-| Reinicio o redeploy         | Todo el estado vive en DynamoDB; las colas conservan lo pendiente                                   |
+## Failures and retries
+
+| Situation                      | Behavior                                                                                      |
+| ------------------------------ | --------------------------------------------------------------------------------------------- |
+| The market sells 0             | Retry with `DelaySeconds = min(60, 2^attempt) + jitter`; the dish stays `WAITING_INGREDIENTS` |
+| The market times out or is 5xx | Technical error: SQS retries; after 5 attempts it goes to the DLQ and the alarm fires         |
+| Duplicate message              | Conditional write keyed by `dishId + step`; the duplicate has no effect                       |
+| One message of a batch fails   | `ReportBatchItemFailures`: only that message is retried                                       |
+| Restart or redeploy            | All state lives in DynamoDB; queues keep whatever is pending                                  |

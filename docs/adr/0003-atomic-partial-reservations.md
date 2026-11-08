@@ -1,28 +1,28 @@
-# ADR 0003 — Reservas atómicas y parciales del inventario
+# ADR 0003 — Atomic, partial inventory reservations
 
-- Estado: aceptado
-- Fecha: 2026-11-07
+- Status: accepted
+- Date: 2026-11-07
 
-## Contexto
+## Context
 
-La bodega arranca con 5 unidades por ingrediente, y en una ráfaga cientos de platos las piden a la vez. Sin control de concurrencia, dos platos leen "hay 1 tomate", ambos lo descuentan y el stock queda negativo. Además, la plaza puede vender menos de lo pedido o 0.
+The warehouse starts with 5 units per ingredient, and in a burst hundreds of dishes ask for them at once. Without concurrency control, two dishes read "there is 1 tomato", both deduct it and the stock goes negative. On top of that, the market may sell less than requested, or nothing.
 
-## Decisión
+## Decision
 
-- Cada ingrediente es un ítem en DynamoDB. Todo descuento es un `UpdateItem` condicional (`stock >= :n`), así que el stock nunca puede quedar negativo.
-- La reserva es **parcial**: un plato toma lo que haya y pide a la plaza solo lo que le falta.
-- Lo comprado se **asigna primero al plato que lo pidió**, y el sobrante va al stock general.
-- La reserva es el descuento que pide el enunciado ("se descuentan al prepararlo"): el plato pasa a `PREPARING` solo cuando tiene todo reservado.
+- Each ingredient is a DynamoDB item. Every deduction is a conditional write (`stock >= :n`), so stock can never go negative.
+- A reservation is **partial**: a dish takes whatever is there and asks the market only for what it is missing.
+- Purchased units **go first to the dish that asked for them**; any surplus goes to general stock.
+- The reservation is the deduction the brief asks for ("deducted when prepared"): a dish moves to `PREPARING` only once everything is reserved.
 
-## Consecuencias
+## Consequences
 
-- El throughput escala con los Lambdas en paralelo; la contención se limita a un ítem por ingrediente.
-- No hay deadlock: ningún plato espera a que otro libere stock, todo faltante se compra.
-- No hay inanición: la compra de un plato no puede quedársela otro.
-- Un plato puede tener stock reservado mientras espera el resto. Es aceptable, porque la plaza es la fuente infinita y ese stock se usa igual.
+- Throughput scales with parallel Lambdas; contention is limited to one item per ingredient.
+- No deadlock: no dish waits for another to release stock, since every shortage is bought.
+- No starvation: another dish cannot take a dish's purchase.
+- A dish may hold reserved stock while it waits for the rest. That is acceptable: the market is an infinite source and the stock is used anyway.
 
-## Alternativas descartadas
+## Rejected alternatives
 
-- **Reserva todo o nada con `TransactWriteItems`**: con 5 unidades y alta demanda casi todas las transacciones fallarían y se reintentarían, y todos los platos acabarían comprando todo.
-- **Cola FIFO con un solo grupo que serializa la bodega**: correcto y simple, pero limita el throughput a un consumidor y convierte la bodega en el cuello de botella.
-- **Lock distribuido**: más piezas y más latencia que una escritura condicional, sin ventaja.
+- **All-or-nothing reservation with `TransactWriteItems`**: with 5 units and high demand almost every transaction would fail and retry, and each dish would end up buying its whole recipe.
+- **A FIFO queue with a single group serializing the warehouse**: correct and simple, but it caps throughput at one consumer and makes the warehouse the bottleneck.
+- **A distributed lock**: more moving parts and more latency than a conditional write, with no benefit.

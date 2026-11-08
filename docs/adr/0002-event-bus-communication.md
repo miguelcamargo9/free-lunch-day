@@ -1,27 +1,27 @@
-# ADR 0002 — Comunicación por eventos: EventBridge + SQS por consumidor
+# ADR 0002 — Event-based communication: EventBridge + one SQS queue per consumer
 
-- Estado: aceptado
-- Fecha: 2026-11-07
+- Status: accepted
+- Date: 2026-11-07
 
-## Contexto
+## Context
 
-Cocina, bodega y plaza tienen ritmos muy distintos: la cocina genera cientos de platos en un segundo, y la plaza responde lento y a veces no vende. Si los servicios se llaman por HTTP, la lentitud de uno se propaga a todos y una ráfaga los tumba en cadena.
+Kitchen, warehouse and market move at very different speeds: the kitchen creates hundreds of dishes in a second, while the market answers slowly and sometimes sells nothing. If services call each other over HTTP, one slow service slows them all and a burst brings them down in a cascade.
 
-## Decisión
+## Decision
 
-- Un bus de **EventBridge** (`lunch-bus`) por el que pasan todos los eventos de dominio definidos en `packages/contracts`.
-- Cada servicio consumidor tiene una **cola SQS con DLQ** como destino de su regla. El Lambda lee de la cola, nunca directo del bus.
-- Ningún servicio llama a otro por HTTP. Las únicas entradas HTTP son las del dashboard (`POST /orders`, `POST /assistant`).
+- One **EventBridge** bus (`lunch-bus`) carries every domain event defined in `packages/contracts`.
+- Each consuming service has an **SQS queue with a DLQ** as its rule target. The Lambda reads from the queue, never straight from the bus.
+- No service calls another over HTTP. The only HTTP entry points are the dashboard's (`POST /orders`, `POST /assistant`).
 
-## Consecuencias
+## Consequences
 
-- Agregar un consumidor (por ejemplo `realtime` o una analítica) es agregar una regla, sin tocar a los productores.
-- La cola desacopla ritmos: absorbe la ráfaga, reintenta y permite limitar la concurrencia del Lambda de compras.
-- La entrega es al menos una vez: todos los handlers deben ser idempotentes.
-- No hay orden global entre eventos: la lógica no puede depender de él. La máquina de estados del plato usa escrituras condicionales.
+- Adding a consumer (for example `realtime`, or analytics) means adding a rule, without touching the producers.
+- The queue decouples speeds: it absorbs bursts, retries and lets us cap the purchase Lambda's concurrency.
+- Delivery is at least once: every handler must be idempotent.
+- There is no global order between events, so logic cannot depend on it. The dish state machine relies on conditional writes.
 
-## Alternativas descartadas
+## Rejected alternatives
 
-- **HTTP síncrono entre servicios**: acoplamiento temporal y fallos en cascada.
-- **SNS + SQS**: sirve, pero el filtrado por contenido y la integración nativa de EventBridge (archivo, replay, reglas por `detail-type`) son mejores para un bus de dominio.
-- **Kinesis**: orden por partición, pero sobredimensionado y con costo fijo por shard.
+- **Synchronous HTTP between services**: temporal coupling and cascading failures.
+- **SNS + SQS**: works, but EventBridge's content filtering and native features (archive, replay, rules per `detail-type`) fit a domain bus better.
+- **Kinesis**: per-partition ordering, but oversized here and with a fixed cost per shard.

@@ -9,7 +9,7 @@ export interface Recipe {
 export const RECIPES: readonly Recipe[] = [
   {
     id: 'chicken-rice',
-    name: 'Arroz con pollo',
+    name: 'Chicken and rice',
     ingredients: [
       { ingredient: 'rice', quantity: 2 },
       { ingredient: 'chicken', quantity: 1 },
@@ -19,7 +19,7 @@ export const RECIPES: readonly Recipe[] = [
   },
   {
     id: 'cheeseburger',
-    name: 'Hamburguesa con queso',
+    name: 'Cheeseburger',
     ingredients: [
       { ingredient: 'meat', quantity: 1 },
       { ingredient: 'cheese', quantity: 1 },
@@ -31,7 +31,7 @@ export const RECIPES: readonly Recipe[] = [
   },
   {
     id: 'lemon-chicken-salad',
-    name: 'Ensalada de pollo al limón',
+    name: 'Lemon chicken salad',
     ingredients: [
       { ingredient: 'chicken', quantity: 1 },
       { ingredient: 'lettuce', quantity: 2 },
@@ -41,7 +41,7 @@ export const RECIPES: readonly Recipe[] = [
   },
   {
     id: 'potato-gratin',
-    name: 'Papas gratinadas',
+    name: 'Potato gratin',
     ingredients: [
       { ingredient: 'potato', quantity: 3 },
       { ingredient: 'cheese', quantity: 2 },
@@ -50,7 +50,7 @@ export const RECIPES: readonly Recipe[] = [
   },
   {
     id: 'steak-and-potatoes',
-    name: 'Carne asada con papas',
+    name: 'Steak and potatoes',
     ingredients: [
       { ingredient: 'meat', quantity: 2 },
       { ingredient: 'potato', quantity: 2 },
@@ -59,7 +59,7 @@ export const RECIPES: readonly Recipe[] = [
   },
   {
     id: 'beef-rice-bowl',
-    name: 'Bowl de carne y arroz',
+    name: 'Beef and rice bowl',
     ingredients: [
       { ingredient: 'meat', quantity: 1 },
       { ingredient: 'rice', quantity: 2 },

@@ -1,191 +1,191 @@
-# PLANNING — Jornada de Almuerzo Gratis
+# PLANNING — Free Lunch Day
 
-> Escrito antes de la primera línea de código. Este documento muestra cómo entiendo el problema, qué decidí y cómo organicé el trabajo de 7 días. Las decisiones con más peso tienen su ADR en `docs/adr/`.
+> Written before the first line of code. It shows how I read the problem, what I decided and how I organized seven days of work. The decisions that matter most have an ADR in `docs/adr/`.
 
-## 1. Objetivo
+## 1. Goal
 
-Entregar un sistema **serverless en AWS, orientado a eventos y desplegado públicamente**. Debe recibir pedidos masivos de platos y resolver ingredientes contra una bodega pequeña y una plaza de mercado que a veces no vende. Entrega cada plato sin intervención manual, y el gerente ve todo en tiempo real.
+Ship a **serverless, event-driven system on AWS, publicly deployed**. It takes massive dish orders and resolves ingredients against a small warehouse and a farmers market that sometimes sells nothing. Every dish is delivered with no manual step, and the manager watches it all in real time.
 
-Criterios de éxito medibles:
+Measurable success criteria:
 
-| Criterio                             | Meta                                                        |
-| ------------------------------------ | ----------------------------------------------------------- |
-| Respuesta del botón de pedido        | `202 Accepted`, p95 < 300 ms                                |
-| Pedido de 1.000 platos en una ráfaga | 0 platos perdidos, 0 duplicados, todos en `DELIVERED`       |
-| Inventario                           | Nunca negativo, ni bajo 50 gerentes haciendo clic a la vez  |
-| Reinicios / redeploys                | El estado sobrevive (persistencia en DynamoDB)              |
-| Automatización                       | Cero pasos manuales del pedido a la entrega                 |
-| IA                                   | Funcional en el despliegue, con guardarraíles y documentada |
+| Criterion             | Target                                                 |
+| --------------------- | ------------------------------------------------------ |
+| Order button response | `202 Accepted`, p95 < 300 ms                           |
+| A 1,000-dish burst    | 0 lost dishes, 0 duplicates, all `DELIVERED`           |
+| Inventory             | Never negative, even with 50 managers clicking at once |
+| Restarts / redeploys  | State survives (DynamoDB persistence)                  |
+| Automation            | Zero manual steps from order to delivery               |
+| AI                    | Working in the deployment, with guardrails, documented |
 
-## 2. Lectura del enunciado y supuestos
+## 2. Reading of the brief and assumptions
 
-| Tema                 | Lo que dice el reto                                               | Cómo lo interpreto                                                                                                               |
-| -------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Pedido               | El gerente pide "X" platos con un botón                           | `POST /orders { quantity }`, con límite por clic (1–500) e `Idempotency-Key` contra doble clic                                   |
-| Recetas              | 6 recetas definidas por mí, cada una con ingredientes de la lista | 6 recetas fijas con cantidades por ingrediente; entre todas cubren los 10 ingredientes                                           |
-| Bodega               | Arranca con 5 unidades de cada ingrediente                        | Seed inicial de 5 × 10 ingredientes; un "reinicio de jornada" vuelve a ese estado                                                |
-| Plaza                | `GET /buy?ingredient=x` → `{ quantitySold }`; 0 = no disponible   | Verificado: responde `{"quantitySold":2}`; un ingrediente inválido da `400`. Puede vender menos o más de lo que falta            |
-| Lo comprado          | Se compra "lo faltante"                                           | Todo lo vendido entra a la bodega; lo que cubre al plato que lo pidió se le asigna primero, el sobrante queda como stock general |
-| Descuento            | Se descuenta al preparar                                          | La **reserva** atómica del ingrediente es el descuento; el plato pasa a `PREPARING` solo cuando tiene todo                       |
-| Falta de ingrediente | No se especifica un límite                                        | Un plato **nunca falla por falta de ingredientes**: espera y se reintenta la compra con backoff. Solo errores técnicos van a DLQ |
-| Stack                | Node/TS sin Express, Nest u otros frameworks; serverless es PLUS  | Lambdas con handlers puros en TypeScript; solo librerías utilitarias (AWS SDK, Powertools, zod)                                  |
+| Topic            | What the brief says                                                     | How I interpret it                                                                                                                   |
+| ---------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| Order            | The manager orders "X" dishes with a button                             | `POST /orders { quantity }`, capped per click (1–500), with an `Idempotency-Key` against double clicks                               |
+| Recipes          | 6 recipes I define, each using ingredients from the list                | 6 fixed recipes with a quantity per ingredient; together they use all 10 ingredients                                                 |
+| Warehouse        | Starts with 5 units of each ingredient                                  | Initial stock of 5 × 10 ingredients; a "reset the day" action restores it                                                            |
+| Market           | `GET /buy?ingredient=x` → `{ quantitySold }`; 0 = none                  | Verified: returns `{"quantitySold":2}`; an invalid ingredient returns `400`. It may sell less or more than is missing                |
+| What gets bought | Buy "what is missing"                                                   | Everything sold enters the warehouse; the dish that asked for it gets its share first, the rest is general stock                     |
+| Deduction        | Ingredients are deducted when the dish is prepared                      | The atomic **reservation** is the deduction; a dish moves to `PREPARING` only once it has everything                                 |
+| Missing stock    | No limit is given                                                       | A dish **never fails for lack of ingredients**: it waits and the purchase is retried with backoff. Only technical errors go to a DLQ |
+| Stack            | Node/TS without Express, Nest or other frameworks; serverless is a PLUS | Lambdas with plain TypeScript handlers; utility libraries only (AWS SDK, Powertools, zod)                                            |
 
-## 3. Arquitectura en una página
+## 3. Architecture on one page
 
-Cinco microservicios independientes. Cada uno tiene su `serverless.yml`, su tabla DynamoDB y su despliegue. Se comunican **solo por eventos** (EventBridge + una cola SQS con DLQ por consumidor). Ningún servicio llama a otro por HTTP, y solo `market` habla con la API externa.
+Five independent microservices. Each one has its own `serverless.yml`, its own DynamoDB tables and its own deployment. They talk **only through events** (EventBridge plus one SQS queue with a DLQ per consumer). No service calls another over HTTP, and only `market` talks to the external API.
 
 ```mermaid
 flowchart LR
-  UI[Dashboard React<br/>S3 + CloudFront] -- POST /orders --> ORD
+  UI[React dashboard<br/>S3 + CloudFront] -- POST /orders --> ORD
   UI <-- WebSocket --> RT[realtime]
   UI -- POST /assistant --> AI[ai-assistant]
 
   subgraph Bus[EventBridge: lunch-bus]
   end
 
-  ORD[orders / cocina] -- DishCreated / IngredientsRequested --> Bus
-  Bus -- SQS --> WH[warehouse / bodega]
+  ORD[orders / kitchen] -- DishCreated / IngredientsRequested --> Bus
+  Bus -- SQS --> WH[warehouse]
   WH -- IngredientsShortage --> Bus
-  Bus -- SQS --> MK[market / plaza]
-  MK -- GET /buy --> EXT[(API farmers-market)]
+  Bus -- SQS --> MK[market]
+  MK -- GET /buy --> EXT[(farmers-market API)]
   MK -- IngredientPurchased / IngredientUnavailable --> Bus
   WH -- IngredientsReserved --> Bus
   Bus -- SQS --> ORD
-  Bus -- todos los eventos --> RT
-  AI -. lectura .-> ORD & WH & MK
+  Bus -- all events --> RT
+  AI -. read only .-> ORD & WH & MK
 ```
 
-| Servicio       | Responsabilidad                                                                  | Datos propios                            |
-| -------------- | -------------------------------------------------------------------------------- | ---------------------------------------- |
-| `orders`       | Recibe el pedido, asigna recetas aleatorias, orquesta el ciclo de vida del plato | `orders`, `dishes` + catálogo de recetas |
-| `warehouse`    | Inventario, reservas atómicas y parciales por plato                              | `inventory`, `reservations`              |
-| `market`       | Compra en la plaza con reintentos, backoff y concurrencia limitada               | `purchases` (historial)                  |
-| `realtime`     | Empuja los cambios al dashboard por WebSocket                                    | `connections`                            |
-| `ai-assistant` | Copiloto del gerente con tool calling sobre datos en vivo                        | — (solo lectura)                         |
+| Service        | Responsibility                                                   | Owned data                  |
+| -------------- | ---------------------------------------------------------------- | --------------------------- |
+| `orders`       | Takes the order, assigns random recipes, drives each dish's life | `orders`, `dishes`, recipes |
+| `warehouse`    | Inventory, atomic and partial reservations per dish              | `inventory`, `reservations` |
+| `market`       | Buys at the market with retries, backoff and bounded concurrency | `purchases` (history)       |
+| `realtime`     | Pushes changes to the dashboard over WebSocket                   | `connections`               |
+| `ai-assistant` | Manager copilot with tool calling over live data                 | — (read only)               |
 
-### Ciclo de vida de un plato
+### Dish lifecycle
 
 ```mermaid
 stateDiagram-v2
   [*] --> PENDING: DishCreated
-  PENDING --> WAITING_INGREDIENTS: faltan ingredientes
+  PENDING --> WAITING_INGREDIENTS: ingredients missing
   PENDING --> PREPARING: IngredientsReserved
   WAITING_INGREDIENTS --> PREPARING: IngredientsReserved
   PREPARING --> DELIVERED: DishDelivered
   DELIVERED --> [*]
 ```
 
-Cada transición es una escritura condicional sobre el estado actual. Un evento duplicado no puede mover un plato hacia atrás ni entregarlo dos veces.
+Every transition is a conditional write on the current status. A duplicated event can neither move a dish backwards nor deliver it twice.
 
-### Contratos de eventos
+### Event contracts
 
-Viven en `packages/contracts` como esquemas zod versionados. Son la única fuente de verdad entre servicios.
+They live in `packages/contracts` as versioned zod schemas, the single source of truth between services.
 
-1. `OrderBatchRequested` → `DishCreated` (uno por plato)
+1. `OrderBatchRequested` → `DishCreated` (one per dish)
 2. `IngredientsRequested` (orders → warehouse)
-3. `IngredientsShortage` (warehouse → market, con lo que falta por plato)
+3. `IngredientsShortage` (warehouse → market, with what each dish is missing)
 4. `IngredientPurchased` / `IngredientUnavailable` (market → warehouse)
 5. `IngredientsReserved` (warehouse → orders) → `DishPrepared` → `DishDelivered`
 
-## 4. Decisiones clave
+## 4. Key decisions
 
-| Decisión                    | Elegido                                                     | Alternativa descartada                              | ADR                                             |
-| --------------------------- | ----------------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------- |
-| Despliegue                  | Serverless Framework v4, Lambda Node.js 22 + esbuild, ARM64 | Contenedores en ECS/EC2 con Dockerfile por servicio | [0001](adr/0001-serverless-over-containers.md)  |
-| Comunicación                | EventBridge + SQS con DLQ por consumidor                    | HTTP síncrono entre servicios; SNS fan-out          | [0002](adr/0002-event-bus-communication.md)     |
-| Concurrencia del inventario | Reservas atómicas y parciales con `UpdateItem` condicional  | Cola FIFO con un solo grupo que serializa la bodega | [0003](adr/0003-atomic-partial-reservations.md) |
-| Persistencia                | DynamoDB on-demand, una tabla por servicio                  | RDS (costo y servidor que mantener)                 | 0001                                            |
-| Repositorio                 | Monorepo con npm workspaces                                 | Un repo por servicio                                | —                                               |
-| Desarrollo local            | `docker-compose` con LocalStack y DynamoDB Local            | Desarrollar solo contra AWS                         | 0001                                            |
+| Decision              | Chosen                                                      | Rejected alternative                                       | ADR                                             |
+| --------------------- | ----------------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------- |
+| Deployment            | Serverless Framework v4, Lambda Node.js 22 + esbuild, ARM64 | Containers on ECS/EC2 with a Dockerfile per service        | [0001](adr/0001-serverless-over-containers.md)  |
+| Communication         | EventBridge + SQS with a DLQ per consumer                   | Synchronous HTTP between services; SNS fan-out             | [0002](adr/0002-event-bus-communication.md)     |
+| Inventory concurrency | Atomic, partial reservations with conditional `UpdateItem`  | A FIFO queue with a single group serializing the warehouse | [0003](adr/0003-atomic-partial-reservations.md) |
+| Persistence           | On-demand DynamoDB, tables owned per service                | RDS (cost and a server to run)                             | 0001                                            |
+| Repository            | Monorepo with npm workspaces                                | One repository per service                                 | —                                               |
+| Local development     | `docker-compose` with LocalStack and DynamoDB Local         | Developing only against AWS                                | 0001                                            |
 
-## 5. Los tres problemas difíciles
+## 5. The three hard problems
 
-1. **Inventario bajo concurrencia.** Cientos de platos compiten por 5 unidades. Cada ingrediente es un ítem en DynamoDB y la reserva usa `UpdateItem` con `ConditionExpression stock >= :n`. Si hay menos de lo necesario, el plato **reserva lo que hay** y pide a la plaza solo lo que falta. Lo comprado se asigna primero a ese plato. Como la plaza es la fuente infinita, no hay deadlock: todo faltante termina comprado.
-2. **Plaza que vende 0.** No es un error: el mensaje vuelve a SQS con `DelaySeconds` y backoff exponencial con jitter, con tope de 60 s. Nada de `sleep` dentro del Lambda. El Lambda de compras tiene concurrencia reservada (5) para no saturar la API externa.
-3. **Entrega al menos una vez.** SQS y EventBridge pueden duplicar mensajes. Todo handler es idempotente (escrituras condicionales por `dishId + paso`), y los consumidores usan `ReportBatchItemFailures` para reintentar solo lo fallido.
+1. **Inventory under concurrency.** Hundreds of dishes compete for 5 units. Each ingredient is a DynamoDB item and a reservation uses `UpdateItem` with `ConditionExpression stock >= :n`. When there is not enough, the dish **reserves what is there** and asks the market only for the rest. Purchased units go to that dish first. The market is an infinite source, so there is no deadlock: every shortage is eventually bought.
+2. **A market that sells 0.** That is not an error: the message goes back to SQS with `DelaySeconds` and exponential backoff with jitter, capped at 60 s. No `sleep` inside a Lambda. The purchase Lambda has reserved concurrency (5) so it does not overwhelm the external API.
+3. **At-least-once delivery.** SQS and EventBridge may duplicate messages. Every handler is idempotent (conditional writes keyed by `dishId + step`), and consumers use `ReportBatchItemFailures` to retry only what failed.
 
-## 6. Funcionalidad de IA: Copiloto del gerente
+## 6. AI feature: the manager's copilot
 
-**Problema real:** el gerente no es técnico y no va a leer tablas durante un evento masivo. Necesita respuestas como "¿por qué hay 12 platos esperando?" o "¿qué se está agotando?".
+**Real problem:** the manager is not technical and will not read tables in the middle of a massive event. They need answers like "why are 12 dishes waiting?" or "what is running out?".
 
-**Solución:** un asistente conversacional en el dashboard. Responde con **tool calling** sobre herramientas tipadas de solo lectura: `getOrderStats`, `getInventory`, `getPurchaseHistory`, `getWaitingDishes`, `getRecipes`. El modelo nunca escribe ni ejecuta consultas libres, y toda cifra sale de una herramienta.
+**Solution:** a conversational assistant in the dashboard. It answers through **tool calling** over typed, read-only tools: `getOrderStats`, `getInventory`, `getPurchaseHistory`, `getWaitingDishes`, `getRecipes`. The model never writes data or runs free-form queries, and every number comes from a tool.
 
-Guardarraíles: límite de peticiones por minuto, timeout, máximo de tokens y respuesta de respaldo si el proveedor falla. El detalle (modelo, costo por consulta, por qué tool calling y no RAG) va en `docs/ai.md`. Extra si sobra tiempo: botón de "reporte de cierre de la jornada".
+Guardrails: requests-per-minute limit, timeout, max tokens and a fallback answer if the provider fails. The details (model, cost per query, why tool calling and not RAG) go in `docs/ai.md`. Stretch goal: an "end-of-day report" button.
 
-## 7. Plan de trabajo
+## 7. Work plan
 
-Regla: **algo funcional desplegado el día 2**, y el día 7 solo para pulir y documentar. Cada tarea es un issue de 1–3 horas con criterio de aceptación; cada PR referencia su issue.
+Rule: **something working deployed on day 2**, and day 7 kept for polish and docs only. Each task is a 1–3 h issue with acceptance criteria; each PR references its issue.
 
-### Día 1 — Diseño y base
+### Day 1 — Design and foundations
 
-- [ ] T-01 `docs/PLANNING.md` (este documento), commit antes del código
-- [ ] T-02 `docs/ARCHITECTURE.md` con diagramas y ADRs 0001–0003
-- [ ] T-03 Monorepo: npm workspaces, TS estricto, ESLint, Prettier, Vitest
-- [ ] T-04 `packages/contracts`: esquemas zod de todos los eventos + tests
-- [ ] T-05 `AGENTS.md` / `CLAUDE.md`: convenciones para agentes de IA y humanos
-- [ ] T-06 CI en GitHub Actions: lint, typecheck y tests en cada PR
-- [ ] T-07 Cuenta AWS con alarma de presupuesto en USD 5
+- [x] T-01 `docs/PLANNING.md` (this document), committed before any code
+- [x] T-02 `docs/ARCHITECTURE.md` with diagrams and ADRs 0001–0003
+- [x] T-03 Monorepo: npm workspaces, strict TS, ESLint, Prettier, Vitest
+- [x] T-04 `packages/contracts`: zod schemas for every event + tests
+- [x] T-05 `AGENTS.md` / `CLAUDE.md`: conventions for AI agents and humans
+- [x] T-06 GitHub Actions CI: lint, typecheck and tests on every PR
+- [x] T-07 AWS account with a USD 5 budget alarm
 
-### Día 2 — Esqueleto de punta a punta
+### Day 2 — End-to-end skeleton
 
-- [ ] T-08 Infra compartida: bus de EventBridge
-- [ ] T-09 `orders`: `POST /orders`, fan-out a platos, 6 recetas, tabla de platos
-- [ ] T-10 `warehouse`: seed de inventario y reserva simple (camino feliz)
-- [ ] T-11 Camino feliz desplegado: pedido → bodega → entrega, sin plaza todavía
+- [ ] T-08 Shared infrastructure: EventBridge bus
+- [ ] T-09 `orders`: `POST /orders`, fan-out into dishes, 6 recipes, dishes table
+- [ ] T-10 `warehouse`: initial stock and reservations (happy path)
+- [ ] T-11 Happy path deployed: order → warehouse → delivery, no market yet
 
-### Día 3 — Bodega y plaza
+### Day 3 — Warehouse and market
 
-- [ ] T-12 Reservas atómicas y parciales (tests primero)
-- [ ] T-13 `market`: cliente de la plaza con timeout, backoff con `DelaySeconds` y concurrencia reservada
-- [ ] T-14 Asignación de compras al plato que las pidió y sobrante al stock
-- [ ] T-15 Historial de compras
+- [ ] T-12 Atomic, partial reservations (tests first)
+- [ ] T-13 `market`: market client with timeout, `DelaySeconds` backoff and reserved concurrency
+- [ ] T-14 Purchases go to the dish that asked for them, surplus to stock
+- [ ] T-15 Purchase history
 
-### Día 4 — Robustez
+### Day 4 — Robustness
 
-- [ ] T-16 Idempotencia en todos los handlers y máquina de estados condicional
-- [ ] T-17 DLQs, `ReportBatchItemFailures` y alarmas
-- [ ] T-18 Primera prueba de carga (k6) y corrección de lo que falle
+- [ ] T-16 Idempotency in every handler and a conditional state machine
+- [ ] T-17 DLQs, `ReportBatchItemFailures` and alarms
+- [ ] T-18 First load test (k6) and fixing whatever breaks
 
-### Día 5 — Frontend y tiempo real
+### Day 5 — Frontend and real time
 
-- [ ] T-19 `realtime`: API Gateway WebSocket + consumidor de eventos
-- [ ] T-20 Dashboard: botón de pedido, contadores, órdenes en preparación, inventario, historial de compras, historial de pedidos, recetas
-- [ ] T-21 Respaldo por polling y despliegue en S3 + CloudFront
+- [ ] T-19 `realtime`: API Gateway WebSocket + event consumer
+- [ ] T-20 Dashboard: order button, counters, dishes in progress, inventory, purchase history, order history, recipes
+- [ ] T-21 Polling fallback and deployment to S3 + CloudFront
 
-### Día 6 — IA y observabilidad
+### Day 6 — AI and observability
 
-- [ ] T-22 `ai-assistant` con tool calling y guardarraíles
-- [ ] T-23 Panel del copiloto en el dashboard
-- [ ] T-24 Powertools (logger con `correlationId = dishId`, tracer, métricas) y dashboard de CloudWatch
-- [ ] T-25 Prueba de carga final con resultados en `docs/load-testing.md`
+- [ ] T-22 `ai-assistant` with tool calling and guardrails
+- [ ] T-23 Copilot panel in the dashboard
+- [ ] T-24 Powertools (logger with `correlationId = dishId`, tracer, metrics) and a CloudWatch dashboard
+- [ ] T-25 Final load test with results in `docs/load-testing.md`
 
-### Día 7 — Pulido y entrega
+### Day 7 — Polish and delivery
 
-- [ ] T-26 Prueba de usuario con alguien no técnico y ajustes
-- [ ] T-27 README de 5 minutos, `docs/ai.md`, revisión final del código
-- [ ] T-28 Repo privado con `scouting@alegra.com` como colaborador, envío por el formulario
+- [ ] T-26 User test with a non-technical person, then fixes
+- [ ] T-27 5-minute README, `docs/ai.md`, final code review
+- [ ] T-28 Private repository with `scouting@alegra.com` as collaborator, submission through the form
 
-**Orden de recorte si falta tiempo:** reporte de cierre de IA → WebSocket (queda polling) → dashboard de CloudWatch. **No se recorta:** reservas atómicas, idempotencia, prueba de carga.
+**Cut order if time runs short:** AI end-of-day report → WebSocket (polling stays) → CloudWatch dashboard. **Never cut:** atomic reservations, idempotency, load test.
 
-## 8. Definición de terminado
+## 8. Definition of done
 
-Una tarea está terminada cuando:
+A task is done when:
 
-- Tiene tests (unitarios en el dominio; de integración si toca DynamoDB o colas).
-- Pasan `npm run lint`, `npm run typecheck` y `npm test`.
-- No agrega llamadas síncronas entre servicios, `sleep` en Lambdas, escrituras sin condición ni permisos IAM con `*`.
-- Si cambia un contrato, se actualiza `packages/contracts` primero.
+- It has tests (unit tests for the domain; integration tests when it touches DynamoDB or queues).
+- `npm run lint`, `npm run typecheck` and `npm test` pass.
+- It adds no synchronous calls between services, no `sleep` in Lambdas, no unconditional writes and no IAM permissions with `*`.
+- If it changes a contract, `packages/contracts` is updated first.
 
-## 9. Riesgos
+## 9. Risks
 
-| Riesgo                                               | Mitigación                                                                                                 |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| El evaluador espera "microservicios dockerizados"    | Explicar en README que serverless es la opción PLUS; `docker-compose` con LocalStack para desarrollo local |
-| La plaza devuelve 0 muchas veces y los platos tardan | Backoff con tope de 60 s; la UI muestra "esperando ingrediente X" y la IA lo explica                       |
-| Costos inesperados en AWS o en el LLM                | Alarma de presupuesto, DynamoDB on-demand, límites de concurrencia y de tokens                             |
-| Cold starts en la demo                               | esbuild con bundles pequeños, ARM64                                                                        |
-| La URL deja de funcionar durante la revisión         | No destruir el stack hasta recibir respuesta; probar la URL desde otra red el día del envío                |
+| Risk                                            | Mitigation                                                                                                       |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| The reviewer expects "dockerized microservices" | Explain in the README that serverless is the PLUS option; `docker-compose` with LocalStack for local development |
+| The market returns 0 often and dishes take long | Backoff capped at 60 s; the UI shows "waiting for ingredient X" and the AI explains it                           |
+| Unexpected AWS or LLM costs                     | Budget alarm, on-demand DynamoDB, concurrency and token limits                                                   |
+| Cold starts during the demo                     | esbuild with small bundles, ARM64                                                                                |
+| The URL stops working during the review         | Do not tear down the stack until there is an answer; test the URL from another network on submission day         |
 
-## 10. Uso de IA en el desarrollo
+## 10. AI in the development process
 
-Uso Claude Code como par de programación. Yo decido la arquitectura, los contratos y los criterios de aceptación; el agente implementa tareas pequeñas y verificables. Las convenciones que debe respetar están en `AGENTS.md`. Reviso cada diff con la lista de la sección 8. El README documenta el flujo, con ejemplos de prompts y lo que revisé a mano.
+I use Claude Code as a pair programmer. I decide the architecture, the contracts and the acceptance criteria; the agent implements small, verifiable tasks. The conventions it must follow are in `AGENTS.md`. I review every diff against the checklist in section 8. The README documents the workflow, with example prompts and what I reviewed by hand.

@@ -1,10 +1,10 @@
-# Jornada de Almuerzo Gratis
+# Free Lunch Day
 
-Sistema serverless y orientado a eventos que automatiza una jornada masiva de almuerzo gratis: pedidos, bodega, compras en la plaza de mercado y un dashboard en tiempo real para el gerente.
+A serverless, event-driven system that runs a massive free-lunch day end to end: orders, warehouse, farmers market purchases and a real-time dashboard for the manager.
 
-> En construcción. El plan está en [docs/PLANNING.md](docs/PLANNING.md) y el diseño en [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+> Work in progress. The plan is in [docs/PLANNING.md](docs/PLANNING.md) and the design in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Desarrollo local
+## Local development
 
 ```bash
 nvm use
@@ -12,4 +12,4 @@ npm install
 npm run verify
 ```
 
-Las convenciones del repo están en [AGENTS.md](AGENTS.md).
+Repository conventions are in [AGENTS.md](AGENTS.md).

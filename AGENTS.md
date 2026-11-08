@@ -34,7 +34,8 @@ Dependencies point inward: `handlers → application → domain`. `domain` impor
 - Small single-purpose functions; extract shared logic to `packages/shared` instead of copying it between services.
 - Named exports only. File names in kebab-case.
 - Validate every external input (HTTP body, SQS message, API response) with zod at the boundary.
-- Code, identifiers and commit messages in English; product docs in Spanish.
+- Everything in English: code, identifiers, commit messages and docs.
+- No doc comments (JSDoc) or comments that restate the code; a one-line comment only when the reason is not obvious.
 
 ## Commands
 

@@ -1,26 +1,27 @@
-# ADR 0001 — Serverless en AWS en lugar de contenedores
+# ADR 0001 — Serverless on AWS instead of containers
 
-- Estado: aceptado
-- Fecha: 2026-11-07
+- Status: accepted
+- Date: 2026-11-07
 
-## Contexto
+## Context
 
-El reto pide microservicios dockerizados con su propio Dockerfile, o arquitectura serverless como PLUS. El sistema debe aguantar ráfagas de pedidos, sobrevivir reinicios y correr en una capa gratuita sin costo.
+The brief asks for dockerized microservices with one Dockerfile each, or a serverless architecture as a PLUS. The system must absorb bursts of orders, survive restarts and run on a free tier at no cost.
 
-## Decisión
+## Decision
 
-- Cada microservicio es un proyecto de **Serverless Framework v4** con su `serverless.yml`, sus Lambdas (Node.js 22, ARM64, empaquetadas con esbuild) y sus tablas DynamoDB on-demand.
-- Los servicios se despliegan de forma independiente; solo comparten el bus de eventos (infra base) y el paquete de contratos.
-- Para desarrollo local hay un `docker-compose.yml` con LocalStack y DynamoDB Local.
+- Each microservice is a **Serverless Framework v4** project with its own `serverless.yml`, its Lambdas (Node.js 22, ARM64, bundled with esbuild) and its on-demand DynamoDB tables.
+- Services deploy independently; they share only the event bus (base infrastructure) and the contracts package. `serverless-compose.yml` deploys everything in dependency order.
+- For local development, a `docker-compose.yml` runs LocalStack and DynamoDB Local.
 
-## Consecuencias
+## Consequences
 
-- Escala a cero y por demanda: una ráfaga de 1.000 platos no requiere aprovisionar nada, y sin tráfico el costo es ~0.
-- La persistencia sobrevive reinicios por diseño: no hay servidores que apagar.
-- Hay cold starts. Se mitigan con bundles pequeños y ARM64.
-- Serverless v4 exige login en serverless.com y una `SERVERLESS_ACCESS_KEY` en CI (gratis para individuos).
+- Scales to zero and on demand: a 1,000-dish burst needs nothing provisioned, and with no traffic the cost is ~0.
+- Persistence survives restarts by design: there is no server to stop.
+- There are cold starts. Small bundles and ARM64 keep them short.
+- Serverless v4 requires a serverless.com login and a `SERVERLESS_ACCESS_KEY` in CI (free for individuals).
 
-## Alternativas descartadas
+## Rejected alternatives
 
-- **ECS Fargate o EC2 con un Dockerfile por servicio**: cumple la opción base, pero Fargate no tiene capa gratuita, y una EC2 t3.micro con todos los contenedores es un punto único de falla que escala manualmente.
-- **AWS CDK / SST**: válidos, pero el reto nombra Serverless Framework explícitamente y `serverless.yml` por servicio expresa mejor la independencia de cada microservicio.
+- **ECS Fargate or EC2 with a Dockerfile per service**: meets the base option, but Fargate has no free tier, and a single t3.micro running every container is a single point of failure that scales by hand.
+- **AWS SAM**: AWS-native and needs no extra account, but templates are more verbose and there is no equivalent of `serverless-compose` to deploy and wire several services; the brief also names Serverless Framework explicitly.
+- **AWS CDK / SST**: valid, but more code than configuration for this size, and a `serverless.yml` per service shows each microservice's independence more clearly.
