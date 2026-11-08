@@ -9,7 +9,7 @@ Conventions for anyone (human or AI agent) changing this repo. Read `docs/ARCHIT
 - Services talk **only through events** on EventBridge. Never call another service over HTTP. Only `market` calls the external farmers-market API.
 - Event shapes live in `packages/contracts`. Change the contract there first, then the producers and consumers. Never define an event shape inside a service.
 - Every handler is **idempotent**: conditional writes keyed by `dishId + step`. Duplicated messages must have no effect.
-- No `sleep`/`setTimeout` waits inside Lambdas. Retry with SQS `DelaySeconds`.
+- Never wait for a business condition inside a Lambda (no `sleep` until stock arrives); retry later with SQS `DelaySeconds`. The only allowed in-process wait is `retryOnConflict` for write races that settle in milliseconds.
 - DynamoDB writes that depend on current state use a `ConditionExpression`. Inventory can never go negative.
 - IAM permissions are scoped to specific resources. Never `Resource: '*'` on data actions.
 

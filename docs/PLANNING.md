@@ -135,10 +135,10 @@ Rule: **something working deployed on day 2**, and day 7 kept for polish and doc
 
 ### Day 3 — Warehouse and market
 
-- [ ] T-12 Atomic, partial reservations (tests first)
-- [ ] T-13 `market`: market client with timeout, `DelaySeconds` backoff and reserved concurrency
-- [ ] T-14 Purchases go to the dish that asked for them, surplus to stock
-- [ ] T-15 Purchase history
+- [x] T-12 Atomic, partial reservations (tests first)
+- [x] T-13 `market`: market client with timeout, `DelaySeconds` backoff and reserved concurrency
+- [x] T-14 Purchases go to the dish that asked for them, surplus to stock
+- [x] T-15 Purchase history
 
 ### Day 4 — Robustness
 

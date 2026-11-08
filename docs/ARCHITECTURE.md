@@ -23,7 +23,10 @@ flowchart LR
       W1[λ reserve] --> WT[(inventory / reservations)]
     end
     subgraph market
-      M1[λ buy<br/>concurrency 5] --> MT[(purchases)]
+      M0[λ marketEvents] --> MT[(requests / purchases)]
+      M0 --> MQ[[purchase jobs queue]] --> M1[λ purchaseJobs<br/>max concurrency 5]
+      M1 --> MT
+      M1 --> MQ
     end
     subgraph realtime
       R1[λ broadcast] --> RT[(connections)]
@@ -37,7 +40,7 @@ flowchart LR
   UI <--> WS <--> R1
   UI --> HTTP --> AI
   O1 & O2 & W1 & M1 -- PutEvents --> BUS
-  BUS -- SQS + DLQ --> O2 & W1 & M1 & R1
+  BUS -- SQS + DLQ --> O2 & W1 & M0 & R1
   M1 --> EXT
 ```
 
@@ -98,14 +101,15 @@ Every event is defined in [`packages/contracts`](../packages/contracts/src/event
 
 ## Data model
 
-| Service   | Table          | Key                       | Main attributes                                                |
-| --------- | -------------- | ------------------------- | -------------------------------------------------------------- |
-| orders    | `orders`       | `orderId`                 | `quantity`, `createdAt`                                        |
-| orders    | `dishes`       | `dishId`; GSI `byOrder`   | `orderId`, `recipeId`, `status`, `createdAt`, `updatedAt`      |
-| warehouse | `inventory`    | `ingredient`              | `stock` (never negative, enforced by a condition)              |
-| warehouse | `reservations` | `dishId`                  | per ingredient: `needed`, `reserved`                           |
-| market    | `purchases`    | `purchaseId`; GSI by date | `dishId`, `ingredient`, `requested`, `quantitySold`, `attempt` |
-| realtime  | `connections`  | `connectionId`            | 2 h TTL                                                        |
+| Service   | Table               | Key                                       | Main attributes                                                      |
+| --------- | ------------------- | ----------------------------------------- | -------------------------------------------------------------------- |
+| orders    | `orders`            | `orderId`                                 | `quantity`, `createdAt`                                              |
+| orders    | `dishes`            | `dishId`; GSI `byOrder`                   | `orderId`, `recipeId`, `status`, `createdAt`, `updatedAt`            |
+| warehouse | `inventory`         | `ingredient`                              | `stock` (never negative, enforced by a condition)                    |
+| warehouse | `reservations`      | `dishId`                                  | per ingredient: `needed`, `reserved`                                 |
+| market    | `purchase-requests` | `requestId` (one per dish and ingredient) | `requested`, `purchased`, `attempts`, `scheduledAttempt`             |
+| market    | `purchases`         | `purchaseId`; GSI `byTime`                | `dishId`, `ingredient`, `requested`, `quantitySold`, `attempt`, `at` |
+| realtime  | `connections`       | `connectionId`                            | 2 h TTL                                                              |
 
 An order's per-status counts are computed on read from its dishes (GSI `byOrder`). Stored counters on the order item would make it a hot item: every dish of a burst writes to it and concurrent transactions on one item get rejected (`TransactionConflict`).
 
@@ -121,6 +125,19 @@ The algorithm per ingredient of a dish, in `warehouse`:
 When `IngredientPurchased` arrives, `min(quantitySold, missing)` goes to the dish and the rest goes to `stock`. Once every ingredient of the dish has `reserved = needed`, it publishes `IngredientsReserved`.
 
 There is no deadlock: no dish waits for another one to release stock, because every shortage gets bought. Details and alternatives are in [ADR 0003](adr/0003-atomic-partial-reservations.md).
+
+## Buying at the market
+
+`market` turns each `IngredientsShortage` into one **purchase request** per dish and ingredient. Its id is derived from both, so a duplicated shortage opens nothing new. Each attempt is a message on an internal job queue, consumed with `maximumConcurrency: 5` so bursts never overwhelm the external API.
+
+1. A job reads its request. If the request already passed that attempt, the job is stale and does nothing.
+2. It calls the market and records the attempt (`attempts = n IF attempts = n − 1`, plus a history row) in one transaction.
+3. Sold > 0 → `IngredientPurchased`; if the dish still needs more, the next attempt is queued at once. Sold 0 → `IngredientUnavailable` and the next attempt is queued with a backoff delay.
+4. `scheduledAttempt` records which attempt is already queued. A crash re-queues safely, while a replayed job only re-announces and never forks the retry chain.
+
+## Write contention
+
+Single-item conditional writes never conflict; DynamoDB serializes them. Transactions do: two transactions touching the same item at once fail with `TransactionConflict`. The only transactions on a hot item are the warehouse's (an ingredient's stock plus a dish's reservation). They are retried in-process with a jittered backoff of a few milliseconds (`retryOnConflict`); SQS redelivery is the fallback.
 
 ## Failures and retries
 

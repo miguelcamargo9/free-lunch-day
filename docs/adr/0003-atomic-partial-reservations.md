@@ -19,6 +19,7 @@ The warehouse starts with 5 units per ingredient, and in a burst hundreds of dis
 - Throughput scales with parallel Lambdas; contention is limited to one item per ingredient.
 - No deadlock: no dish waits for another to release stock, since every shortage is bought.
 - No starvation: another dish cannot take a dish's purchase.
+- Moving stock into a reservation is a two-item transaction, and transactions on a hot ingredient item can fail with `TransactionConflict` during a burst. Those are retried in-process with a few milliseconds of jittered backoff, then by SQS.
 - A dish may hold reserved stock while it waits for the rest. That is acceptable: the market is an infinite source and the stock is used anyway.
 
 ## Rejected alternatives
