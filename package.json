@@ -18,7 +18,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "npm run lint && npm run format:check && npm run typecheck && npm test"
+    "verify": "npm run lint && npm run format:check && npm run typecheck && npm test",
+    "deploy": "scripts/deploy.sh"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
