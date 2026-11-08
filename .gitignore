@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+.serverless/
+.esbuild/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+
+# Versioned project docs (override personal global ignores)
+!CLAUDE.md
+!docs/ARCHITECTURE.md
