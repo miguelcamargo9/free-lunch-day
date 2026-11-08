@@ -1,0 +1,77 @@
+org: miguelcamargo9
+app: free-lunch-day
+service: lunch-orders
+
+provider:
+  name: aws
+  runtime: nodejs22.x
+  architecture: arm64
+  region: us-east-1
+  stage: ${opt:stage, 'dev'}
+  memorySize: 256
+  timeout: 10
+  logRetentionInDays: 7
+  environment:
+    EVENT_BUS_NAME: ${param:eventBusName}
+    ORDERS_TABLE: !Ref OrdersTable
+    DISHES_TABLE: !Ref DishesTable
+    NODE_OPTIONS: --enable-source-maps
+  httpApi:
+    cors: true
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:ConditionCheckItem]
+          Resource: [!GetAtt OrdersTable.Arn, !GetAtt DishesTable.Arn]
+        - Effect: Allow
+          Action: events:PutEvents
+          Resource: ${param:eventBusArn}
+
+functions:
+  createOrder:
+    handler: src/handlers/create-order.handler
+    events:
+      - httpApi: POST /orders
+  getOrder:
+    handler: src/handlers/get-order.handler
+    events:
+      - httpApi: GET /orders/{orderId}
+  listRecipes:
+    handler: src/handlers/list-recipes.handler
+    events:
+      - httpApi: GET /recipes
+  kitchenEvents:
+    handler: src/handlers/kitchen-events.handler
+    timeout: 120 # a 500-dish batch creates every dish in one invocation
+    events:
+      - sqs:
+          arn: !GetAtt EventsQueue.Arn
+          batchSize: 10
+          functionResponseType: ReportBatchItemFailures
+
+custom:
+  subscription:
+    detailTypes: [OrderBatchRequested, IngredientsReserved]
+    visibilityTimeout: 720 # 6 × the consumer timeout
+
+resources:
+  - Resources:
+      OrdersTable:
+        Type: AWS::DynamoDB::Table
+        Properties:
+          BillingMode: PAY_PER_REQUEST
+          AttributeDefinitions:
+            - { AttributeName: orderId, AttributeType: S }
+          KeySchema:
+            - { AttributeName: orderId, KeyType: HASH }
+      DishesTable:
+        Type: AWS::DynamoDB::Table
+        Properties:
+          BillingMode: PAY_PER_REQUEST
+          AttributeDefinitions:
+            - { AttributeName: dishId, AttributeType: S }
+          KeySchema:
+            - { AttributeName: dishId, KeyType: HASH }
+  - ${file(../../infra/templates/event-subscription.mjs)}
