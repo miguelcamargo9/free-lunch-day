@@ -95,9 +95,9 @@ export class DynamoInventoryRepository implements InventoryRepository {
               Update: {
                 TableName: this.tables.reservations,
                 Key: { dishId: move.dishId },
-                UpdateExpression: 'SET lines.#ingredient.reserved = :after',
-                ConditionExpression: 'lines.#ingredient.reserved = :before',
-                ExpressionAttributeNames: { '#ingredient': move.ingredient },
+                UpdateExpression: 'SET #lines.#ingredient.reserved = :after',
+                ConditionExpression: '#lines.#ingredient.reserved = :before',
+                ExpressionAttributeNames: { '#lines': 'lines', '#ingredient': move.ingredient },
                 ExpressionAttributeValues: {
                   ':before': move.reservedBefore,
                   ':after': move.reservedBefore + move.quantity,

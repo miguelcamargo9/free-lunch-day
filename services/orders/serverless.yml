@@ -1,6 +1,7 @@
 org: miguelcamargo9
 app: free-lunch-day
 service: lunch-orders
+build: ${file(../../infra/templates/build.yml)}
 
 provider:
   name: aws

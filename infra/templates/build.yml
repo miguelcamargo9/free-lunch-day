@@ -1,0 +1,10 @@
+esbuild:
+  bundle: true
+  minify: true
+  sourcemap: true
+  external:
+    - '@aws-sdk/*'
+  exclude:
+    - '@aws-sdk/*'
+  banner:
+    js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);"

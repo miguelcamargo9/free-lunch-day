@@ -28,9 +28,12 @@ export function parseJsonBody<TSchema extends z.ZodType>(
   event: APIGatewayProxyEventV2,
   schema: TSchema,
 ): z.infer<TSchema> {
+  const body = event.isBase64Encoded
+    ? Buffer.from(event.body ?? '', 'base64').toString('utf8')
+    : event.body;
   let raw: unknown;
   try {
-    raw = JSON.parse(event.body ?? '{}');
+    raw = JSON.parse(body || '{}');
   } catch {
     throw new HttpError(400, 'Body must be valid JSON');
   }
