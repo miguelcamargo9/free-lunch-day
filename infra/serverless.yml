@@ -1,0 +1,27 @@
+org: miguelcamargo9
+app: free-lunch-day
+service: lunch-infra
+
+provider:
+  name: aws
+  region: us-east-1
+  stage: ${opt:stage, 'dev'}
+
+resources:
+  Resources:
+    EventBus:
+      Type: AWS::Events::EventBus
+      Properties:
+        Name: lunch-bus-${sls:stage}
+
+    EventArchive:
+      Type: AWS::Events::Archive
+      Properties:
+        SourceArn: !GetAtt EventBus.Arn
+        RetentionDays: 7
+
+  Outputs:
+    EventBusName:
+      Value: !Ref EventBus
+    EventBusArn:
+      Value: !GetAtt EventBus.Arn

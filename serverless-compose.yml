@@ -1,0 +1,13 @@
+services:
+  infra:
+    path: infra
+
+  orders:
+    path: services/orders
+    params: &eventBus
+      eventBusName: ${infra.EventBusName}
+      eventBusArn: ${infra.EventBusArn}
+
+  warehouse:
+    path: services/warehouse
+    params: *eventBus
