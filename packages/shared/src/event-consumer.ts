@@ -7,22 +7,15 @@ type EventHandler<TDefinition extends LunchEventDefinition> = (
   detail: EventDetail<TDefinition>,
 ) => Promise<void>;
 
-/** One optional, fully typed handler per event a service subscribes to. */
 export type EventHandlers = {
   [TDefinition in LunchEventDefinition as TDefinition['detailType']]?: EventHandler<TDefinition>;
 };
 
-/** Shape of an EventBridge event once a rule delivers it to an SQS queue. */
 const EventBridgeEnvelopeSchema = z.object({
   'detail-type': z.string(),
   detail: z.unknown(),
 });
 
-/**
- * Builds an SQS Lambda handler that validates each EventBridge event against its
- * contract and dispatches it. Failed records are reported individually
- * (ReportBatchItemFailures) so only they are retried and, eventually, sent to the DLQ.
- */
 export function createEventConsumer(handlers: EventHandlers, logger: Logger) {
   const processRecord = async (record: SQSRecord): Promise<void> => {
     const envelope = EventBridgeEnvelopeSchema.parse(JSON.parse(record.body));

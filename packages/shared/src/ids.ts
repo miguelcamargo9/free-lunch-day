@@ -1,9 +1,5 @@
 import { createHash } from 'node:crypto';
 
-/**
- * RFC 4122 version-5 UUID: the same (namespace, name) always yields the same id.
- * Used to make retried writes idempotent (e.g. the n-th dish of an order).
- */
 export function uuidV5(name: string, namespace: string): string {
   const namespaceBytes = Buffer.from(namespace.replaceAll('-', ''), 'hex');
   const hash = createHash('sha1').update(namespaceBytes).update(name).digest().subarray(0, 16);

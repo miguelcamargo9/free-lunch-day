@@ -3,8 +3,8 @@ import {
   DishIdSchema,
   IngredientListSchema,
   IngredientSchema,
-  MAX_DISHES_PER_ORDER,
   OrderIdSchema,
+  OrderQuantitySchema,
   PurchaseIdSchema,
   RecipeIdSchema,
 } from '../domain.js';
@@ -18,15 +18,13 @@ const DishRefSchema = z.object({
   recipeId: RecipeIdSchema,
 });
 
-// ── orders (kitchen) ─────────────────────────────────────────────────────────
-
 export const OrderBatchRequested = defineEvent({
   detailType: 'OrderBatchRequested',
   source: EVENT_SOURCES.orders,
   version: 1,
   payload: z.object({
     orderId: OrderIdSchema,
-    quantity: positiveInt.max(MAX_DISHES_PER_ORDER),
+    quantity: OrderQuantitySchema,
   }),
 });
 
@@ -58,8 +56,6 @@ export const DishDelivered = defineEvent({
   payload: DishRefSchema,
 });
 
-// ── warehouse ────────────────────────────────────────────────────────────────
-
 export const IngredientsShortage = defineEvent({
   detailType: 'IngredientsShortage',
   source: EVENT_SOURCES.warehouse,
@@ -73,8 +69,6 @@ export const IngredientsReserved = defineEvent({
   version: 1,
   payload: z.object({ dishId: DishIdSchema, ingredients: IngredientListSchema }),
 });
-
-// ── market ───────────────────────────────────────────────────────────────────
 
 const PurchaseAttemptSchema = z.object({
   purchaseId: PurchaseIdSchema,
@@ -98,7 +92,6 @@ export const IngredientUnavailable = defineEvent({
   payload: PurchaseAttemptSchema.extend({ retryInSeconds: z.number().int().nonnegative() }),
 });
 
-/** Every event in the system; detail types are unique (enforced by tests). */
 export const LUNCH_EVENTS = [
   OrderBatchRequested,
   DishCreated,

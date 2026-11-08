@@ -4,7 +4,6 @@ import { chunk, mapWithConcurrency } from './collections.js';
 
 export type AnyOutgoingEvent = OutgoingEvent<EventDefinition>;
 
-/** Port used by application code; keeps use cases free of the AWS SDK. */
 export interface EventPublisher {
   publish(events: readonly AnyOutgoingEvent[]): Promise<void>;
 }
@@ -35,8 +34,7 @@ export class EventBridgePublisher implements EventPublisher {
         })),
       }),
     );
-    // Throwing makes the caller's message retry; consumers are idempotent, so
-    // re-publishing the entries that did succeed is safe.
+    // Consumers are idempotent, so retrying the whole message is safe.
     if (result.FailedEntryCount) {
       const codes = (result.Entries ?? []).flatMap((entry) => entry.ErrorCode ?? []);
       throw new Error(

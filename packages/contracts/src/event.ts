@@ -1,6 +1,5 @@
 import { z } from 'zod';
 
-/** EventBridge `source` of each publishing service. */
 export const EVENT_SOURCES = {
   orders: 'lunch.orders',
   warehouse: 'lunch.warehouse',
@@ -12,7 +11,6 @@ export const EventMetadataSchema = z.object({
   eventId: z.uuid(),
   occurredAt: z.iso.datetime(),
   version: z.number().int().positive(),
-  /** Groups every event of one flow (the dishId, or the orderId before dishes exist). */
   correlationId: z.string().min(1),
 });
 export type EventMetadata = z.infer<typeof EventMetadataSchema>;
@@ -24,7 +22,6 @@ interface EventSpec<TType extends string, TPayload extends z.ZodType> {
   readonly payload: TPayload;
 }
 
-/** Declares an event: its EventBridge routing fields plus the schema of its `detail`. */
 export function defineEvent<TType extends string, TPayload extends z.ZodType>(
   spec: EventSpec<TType, TPayload>,
 ) {
@@ -44,10 +41,6 @@ export interface OutgoingEvent<TDefinition extends EventDefinition> {
   readonly detail: EventDetail<TDefinition>;
 }
 
-/**
- * Builds a validated event ready to publish. Validation happens here so an
- * invalid event fails in the producer, never in a consumer.
- */
 export function createEvent<TDefinition extends EventDefinition>(
   definition: TDefinition,
   payload: z.input<TDefinition['payload']>,

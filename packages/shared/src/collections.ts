@@ -7,7 +7,6 @@ export function chunk<T>(items: readonly T[], size: number): T[][] {
   return chunks;
 }
 
-/** Maps items with at most `limit` promises in flight, preserving input order. */
 export async function mapWithConcurrency<T, R>(
   items: readonly T[],
   limit: number,

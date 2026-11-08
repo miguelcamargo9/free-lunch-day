@@ -18,6 +18,6 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
     },
   },
-  { files: ['**/*.js'], ...tseslint.configs.disableTypeChecked },
+  { files: ['**/*.{js,mjs,cjs}'], ...tseslint.configs.disableTypeChecked },
   prettier,
 );

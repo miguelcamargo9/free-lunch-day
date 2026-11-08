@@ -1,6 +1,5 @@
 import { z } from 'zod';
 
-/** Ingredients the farmers market sells. Names must match its API exactly. */
 export const INGREDIENTS = [
   'tomato',
   'lemon',
@@ -25,13 +24,12 @@ export type IngredientQuantity = z.infer<typeof IngredientQuantitySchema>;
 
 export const IngredientListSchema = z.array(IngredientQuantitySchema).nonempty();
 
-/** Allowed transitions are enforced by the orders service; see docs/ARCHITECTURE.md. */
 export const DISH_STATUSES = ['PENDING', 'WAITING_INGREDIENTS', 'PREPARING', 'DELIVERED'] as const;
 export const DishStatusSchema = z.enum(DISH_STATUSES);
 export type DishStatus = z.infer<typeof DishStatusSchema>;
 
-/** Upper bound for one click of the order button; larger events are split by the client. */
 export const MAX_DISHES_PER_ORDER = 500;
+export const OrderQuantitySchema = z.number().int().positive().max(MAX_DISHES_PER_ORDER);
 
 export const OrderIdSchema = z.uuid();
 export const DishIdSchema = z.uuid();

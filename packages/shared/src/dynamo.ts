@@ -11,7 +11,6 @@ export function createDocumentClient(): DynamoDBDocumentClient {
   });
 }
 
-/** True when a write lost an optimistic-concurrency or idempotency condition. */
 export function isConditionFailure(error: unknown): boolean {
   if (error instanceof ConditionalCheckFailedException) return true;
   return (

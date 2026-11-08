@@ -7,7 +7,6 @@ import type { Logger } from './logger.js';
 
 export type { HttpResult };
 
-/** An error whose message is safe to show to the client. */
 export class HttpError extends Error {
   constructor(
     readonly statusCode: number,
@@ -40,7 +39,6 @@ export function parseJsonBody<TSchema extends z.ZodType>(
   return result.data;
 }
 
-/** Maps HttpError to its status and anything unexpected to a logged 500. */
 export function httpHandler(
   logger: Logger,
   handle: (event: APIGatewayProxyEventV2) => Promise<HttpResult>,
