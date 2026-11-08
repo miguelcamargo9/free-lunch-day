@@ -1,0 +1,16 @@
+{
+  "name": "@lunch/contracts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Versioned domain events and shared value types exchanged between services.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  }
+}
