@@ -128,10 +128,10 @@ Rule: **something working deployed on day 2**, and day 7 kept for polish and doc
 
 ### Day 2 — End-to-end skeleton
 
-- [ ] T-08 Shared infrastructure: EventBridge bus
-- [ ] T-09 `orders`: `POST /orders`, fan-out into dishes, 6 recipes, dishes table
-- [ ] T-10 `warehouse`: initial stock and reservations (happy path)
-- [ ] T-11 Happy path deployed: order → warehouse → delivery, no market yet
+- [x] T-08 Shared infrastructure: EventBridge bus
+- [x] T-09 `orders`: `POST /orders`, fan-out into dishes, 6 recipes, dishes table
+- [x] T-10 `warehouse`: initial stock and reservations (happy path)
+- [x] T-11 Happy path deployed: order → warehouse → delivery, no market yet
 
 ### Day 3 — Warehouse and market
 
